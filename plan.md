@@ -27,21 +27,31 @@ All 8 required env vars present in `.env` and well-formed:
 Reachability probes (TCP): Neon :5432 OK, Upstash :6379 OK, R2 :443 OK.
 Auth validated via DB smoke test + queue no-op job during this phase.
 
-## Phase 0 — Scaffold (in progress)
+## Phase 0 — Scaffold (COMPLETE 2026-08-20)
 
 Tasks:
-- [ ] git init + root workspace files (pnpm-workspace.yaml, .npmrc, .gitignore, root package.json)
-- [ ] AGENTS.md + plan.md created
-- [ ] apps/web — Next.js 16 scaffold
-- [ ] packages/schemas — Zod schemas (StoryManifest, CharacterBible, SceneManifest) + toJSONSchema + Vitest round-trip
-- [ ] Env validation (Zod) + .env.example
-- [ ] Drizzle — tables stories/jobs/characters/scenes/assets, config, first migration, DB smoke test
-- [ ] packages/storage — R2 typed upload/download/delete
-- [ ] worker — BullMQ queue + no-op job
-- [ ] Root scripts (dev/test/db:generate/db:migrate/typecheck)
+- [x] git init + root workspace files (pnpm-workspace.yaml, .npmrc, .gitignore, root package.json)
+- [x] AGENTS.md + plan.md created
+- [x] apps/web — Next.js 16.3.1 scaffold (TS, Tailwind v4, Turbopack), transpilePackages wired
+- [x] packages/schemas — Zod v4 schemas (StoryManifest, CharacterBible, SceneManifest)
+      + toJSONSchema (draft 2020-12) exports + env validation + Vitest round-trip
+- [x] Env validation (Zod, fails loudly) + .env.example
+- [x] Drizzle — tables stories/jobs/characters/scenes/assets + story_status/job_status/asset_kind
+      enums, config, first migration `0000_overjoyed_reaper.sql` APPLIED to Neon
+- [x] packages/storage — R2 typed upload/download/exists/remove + storyAssetKey helper
+- [x] worker — BullMQ queue 'pipeline' + noop job; ioredis TLS to Upstash
+- [x] Root scripts (dev/test/db:generate/db:migrate/typecheck)
 
-Acceptance:
-- [ ] pnpm dev boots web + worker
-- [ ] pnpm db:migrate runs clean
-- [ ] pnpm test passes (schema round-trip + stories create/read)
-- [ ] No-op BullMQ job completes end to end
+Acceptance — all met:
+- [x] pnpm dev boots web + worker (Next Ready in 3.8s; worker listening on 'pipeline')
+- [x] pnpm db:migrate runs clean (Neon)
+- [x] pnpm test passes: 13 schema/DB tests + 2 R2 round-trip tests (live bucket)
+- [x] No-op BullMQ job completes end to end (job 1 noop completed via Upstash)
+
+Verification notes:
+- create-next-app needs its parent dir to exist before running (its isWriteable
+  check fails on a nonexistent parent) — mkdir apps first next time.
+- create-next-app emits a nested apps/web/pnpm-workspace.yaml; moved its
+  ignoredBuiltDependencies to the root workspace file to keep one workspace root.
+
+## Next: Phase 1 — Ingestion & analysis engine
