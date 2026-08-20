@@ -314,4 +314,108 @@ Findings + gotchas (2026-08-21):
   `.\packages\<pkg>\node_modules\.bin\tsx.CMD <script.ts> <args>` from
   repo root.
 
+## Phase 6 — Player
+
+Once a `.svmp` is loaded client-side, playback works fully offline — no
+further fetches. Two routes hit the same ScenePlayer; only the byte source
+differs (server fetch for hosted, FileReader for dropped file).
+
+Tasks:
+- [x] apps/web package.json — added `jszip@^3.10.1` (browser-side only;
+      no Node deps, weight ~130 KB gz in the bundle).
+- [x] lib/parseBundle.ts — `parseBundle(Uint8Array) -> ParsedBundle`.
+      Mirrors packages/svmp/readBundle but client-side: jszip.loadAsync ->
+      extract every JSON document (manifest.json, characters.json,
+      scenes/*.json) + validate through schemas; build Blob URLs for
+      binary assets (scene images, per-line audio chunks concatenated per
+      scene); parse `captions/*.vtt` into {start, end, speakerId, text}
+      cues with a tolerant parser (handles WEBVTT header, optional cue
+      ids, [speakerId] tag prefix). `dispose()` revokes all blob URLs —
+      caller MUST invoke on unmount (or the URLs leak until tab close).
+      Voice-skipped bundles produce empty cue arrays + null audio URLs,
+      scenes default to a 6s display duration; duration is otherwise
+      probed via a hidden HTML5 audio element's loadedmetadata.
+- [x] components/ScenePlayer.tsx — the actual player. Renders the current
+      scene's illustration behind a 16:9 stage; CSS transform applied per
+      tick (scale 1 -> 1.08, translate subtly) as a Ken-Burns pan synced
+      to scene-local progress. Two drivers:
+        (1) Voiced: a hidden <audio> element per current scene tracks time;
+            onTimeUpdate maps audio.currentTime to bundle-global time via
+            scene.startOffset; onEnded advances to the next scene.
+        (2) Voice-skipped: requestAnimationFrame advances currentTime by
+            (now - lastTick) * playbackRate; auto-advances at scene end.
+      Controls: Play/Pause, ← Prev, Next →, a speed menu
+      (0.5/1/1.25/1.5/2x) wired to audio.playbackRate or the rAF factor,
+      and a scrubber that seeks to a bundle-global time, routes to the
+      correct scene and resets its audio source when present.
+      Caption overlay: a single bottom-of-stage cling showing the active
+      cue (matching currentTime), prefixed with the speaker display name
+      from characters.json (Narrator for the `narrator` tag).
+- [x] components/BundleLoader.tsx — owns (ParsedBundle, loading, error,
+      dispose) lifecycle. Two props: `storyId` (hosted mode, fetches
+      /api/stories/[id]/bundle) or `file` (drag-and-drop mode, reads
+      via File.arrayBuffer()). Both call parseBundle and render
+      ScenePlayer.
+- [x] app/play/[storyId]/page.tsx — server component shell rendering
+      BundleLoader with storyId. Note the URL convention: /play, not
+      /:id/play, so it does NOT collide with /stories/[id] routes and
+      the player has a clean dedicated URL namespace.
+- [x] app/play/page.tsx — client drag-and-drop page; accepts a File via
+      dropped file or file picker, hands it to BundleLoader.
+- [x] StoryView ready branch — animated border becomes a row with
+      "Play story" (-> /play/[id]), "Download .svmp bundle" (anchor to
+      GET /api/stories/[id]/bundle, no fetch in JS needed), and
+      "Open local .svmp file" (-> /play).
+- [x] Live acceptance — Paper Lantern (17031ef4), 184,951-byte bundle:
+      * Hosted /play/[storyId]: server-rendered 200, BundleLoader fetched
+        /bundle, parseBundle decoded the zip + 2 character bibles + 2
+        scene manifests, illustrations rendered (Scene scene_001), Voice
+        being skipped -> totalDuration = 12s (6s/scene fixed). Hit Play:
+        scene 1 illustration scales per frame, slider climbs 0 -> 6,
+        auto-advances to Scene 2 at the 6s boundary, slider continues
+        6 -> 12, Next button disables, timeline reaches end. Controls
+        verified: Pause toggles, Prev/Next swap scenes + restart rAF,
+        speed menu switches the rate, scrubber seeks to any scene.
+      * Drag-and-drop /play: constructed a real File from the same bundle
+        bytes (the same File API FileReader yields for a dropped .svmp),
+        dispatched change on the <input type=file> — BundleLoader read
+        file.arrayBuffer(), parsed, and the ScenePlayer rendered
+        identically ("Playing: paper-lantern.svmp", Scene 1/2, 1 image,
+        sliderMax=12). Play advanced through Scene 2 identically.
+        Offline: after parse no further fetches; image/audio blob URLs
+        only.
+- [x] Suite: 51 tests still pass (no client tests added — Phase 6 is
+      pure interactive UI; the round-trip + readiness gates are covered
+      by Phase 5). Typecheck 0 errors, web lint 0 errors.
+
+Findings + gotchas (2026-08-21):
+- TS dom lib + Uint8Array<ArrayBufferLike>: new Uint8Array(...) result
+  from jszip is typed `Uint8Array<ArrayBufferLike>`, which is NOT
+  assignable to BlobPart in this TS install (same bug as Phase 4 audio
+  downloads). Fix: `bytes.slice()` returns a fresh Uint8Array<ArrayBuffer>
+  that DOM accepts; or map an array of slices. Done in parseBundle.ts
+  for both audio (slice-per-line -> BlobPart[]) and image blobs (.slice()).
+- next/image can't optimise blob: URLs (no real URL, unknown dims at
+  build time). Use a plain <img> with eslint-disable-next-line
+  @next/next/no-img-element on the scene illustration line; the optimizer
+  saving is irrelevant for in-memory blob URLs.
+- Playwright MCP sandbox fs: the file_upload/drop tools run under a
+  non-Windows view that cannot stat `C:\` paths even when listed as an
+  allowed root. Verified by reaching "File access denied" with
+  allowed roots `/tmp/.playwright-mcp, /C:/projects/storylib` — stat
+  worked only for certain path forms, never reliably `C:\` forward or
+  back. Workaround for acceptance: dispatch `change` on the input
+  directly via browser_evaluate, with a File built from the fetched
+  bundle bytes — exercises the same code path (FileReader ->
+  parseBundle -> ScenePlayer) the drop handler would.
+  Phase 7 library can revisit with a Playwright fixture under
+  /tmp/.playwright-mcp/ if a real native drop is required.
+- Browser bundle import hazard (continuing Phase 5 finding): the
+  ScenePlayer / BundleLoader tree imports parseBundle which imports
+  `jszip`. JSZip is browser-safe (no `node:` imports, no fs), so it
+  bundles cleanly. If parseBundle had pulled in @storyframe/svmp's
+  readBundle (which uses `node:crypto` + yauzl-promise) it would have
+  killed the client tree — parseBundle is a parallel browser impl, NOT
+  a re-export. Keep them split intentionally; do NOT consolidate.
+
 ## Phase 2 — Cast review & approval (BUILDING — gated on Phase 1 acceptance)

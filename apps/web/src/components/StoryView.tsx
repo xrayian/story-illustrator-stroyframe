@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import type { CharacterBible, StoryManifest } from "@storyframe/schemas";
 import { CastReview } from "@/components/CastReview";
 import { VoiceDirector } from "@/components/VoiceDirector";
@@ -176,6 +177,26 @@ export function StoryView({ storyId }: { storyId: string }) {
             visualSkipped={story.visual_skipped}
           />
         )}
+        <div className="flex flex-wrap gap-3">
+          <a
+            href={`/play/${storyId}`}
+            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+          >
+            Play story
+          </a>
+          <a
+            href={`/api/stories/${storyId}/bundle`}
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          >
+            Download .svmp bundle
+          </a>
+          <Link
+            href="/play"
+            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+          >
+            Open local .svmp file
+          </Link>
+        </div>
       </div>
     );
   }
