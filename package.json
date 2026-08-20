@@ -1,0 +1,18 @@
+{
+  "name": "storyframe",
+  "private": true,
+  "version": "0.0.0",
+  "packageManager": "pnpm@10.9.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --stream dev",
+    "dev:web": "pnpm --filter @storyframe/web dev",
+    "dev:worker": "pnpm --filter @storyframe/worker dev",
+    "test": "pnpm -r --stream test",
+    "db:generate": "pnpm --filter @storyframe/schemas db:generate",
+    "db:migrate": "pnpm --filter @storyframe/schemas db:migrate",
+    "typecheck": "pnpm -r --stream typecheck"
+  }
+}
