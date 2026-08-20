@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./assemble": "./src/assemble.ts"
   },
   "scripts": {
     "test": "vitest run",
@@ -14,6 +15,7 @@
     "@google/genai": "^2.18.0",
     "@storyframe/schemas": "workspace:*",
     "@storyframe/storage": "workspace:*",
+    "@storyframe/svmp": "workspace:*",
     "drizzle-orm": "^0.45.2",
     "zod": "^4.4.3"
   },

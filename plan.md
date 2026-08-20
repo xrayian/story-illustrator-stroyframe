@@ -213,4 +213,105 @@ Blocker + findings (2026-08-20):
   woman in her late fifties"). Acceptable per hard rules (never guess) but
   under-extracts; re-check when pro is available.
 
+## Phase 5 — Bundle assembler (`packages/svmp`)
+
+A `.svmp` is a ZIP container holding everything the player needs to render a
+story offline: manifest, characters, scenes, audio + per-line timestamps,
+images, and `.vtt` captions. Once assembled the bundle re-opens via the reader
+library with zero additional API calls (acceptance criterion met, see below).
+
+Format spec lives in `docs/svmp-format.md` (source of truth — keep the writer,
+reader, and player in sync with it when the schema changes). `format_version`
+is `1` from day one.
+
+Tasks:
+- [x] packages/svmp — clean new package, deps `yazl` (write) + `yauzl-promise`
+      (read) both pure-JS streaming libs (no native deps; honors the spec's
+      "don't buffer everything in memory" rule — yazl streams entries
+      sequentially, peak per-asset memory ≈ largest asset + zip buffer).
+- [x] bundle.ts — `writeBundle(input)` and `readBundle(buf)`. AssetProvider
+      interface (`list()` async iter + `get(path)` for binary assets); inline
+      JSON entries (manifest, characters, scenes/*, captions/*.vtt) written
+      through yazl addBuffer. `BundleManifest` records format_version=1,
+      title, engine {gemini_analysis_model, gemini_image_model,
+      voice_engine, image_engine}, counts, duration_seconds, voice_skipped,
+      visual_skipped, created_at. Sum of audio durations becomes the
+      bundle-wide timeline; offsets are applied to VTT cue times.
+- [x] checksums.ts — SHA-256 hex per entry, except manifest.json and
+      checksums.json themselves (per docs/svmp-format.md — lets counts/duration
+      be bumped without invalidating every checksum; checksums.json is not
+      self-hashing). `readBundle` recomputes every checksum on load and
+      throws `"Checksum mismatch for <path>"` on any drift.
+- [x] captions.ts — `parseLineTimestamps` (validates the ElevenLabs
+      with-timestamps shape written by narrate.ts), `sceneToVtt(sceneId,
+      lines, offset)` (WebVTT header + numbered cues, speaker-id prefixed in
+      `[id]` brackets so the player maps to display name via characters.json,
+      word-chunks of >=0.4s, bundle-wide offset applied), `formatVttTime`
+      (clamp negative, HH:MM:SS.mmm).
+- [x] Round-trip unit test — 11 tests (formatVttTime zero/hours/clamp,
+      sha256 deterministic, parseLineTimestamps valid+throws, sceneToVtt
+      header/cues/offset, write/read identical manifest + characters + scenes,
+      checksums exclude manifest/checksums, voice-skipped bundle with no
+      audio). All pass.
+- [x] packages/pipeline/src/assemble.ts — `assembleBundle(storyId, db, r2,
+      opts)` pulls every asset (audio, image, timestamps) from R2 one at a
+      time via an AssetProvider over the assets table, rewrites
+      `reference_image_url` / `scene.image.url` from streaming API paths to
+      bundle-relative paths (so the bundle is fully self-contained), builds
+      per-scene VTT with cumulative offset, queries the story manifest for
+      counts, returns `{ zip, manifest }`. Exposed via a separate entry point
+      `@storyframe/pipeline/assemble` (NOT the main `.` entry) so Next.js
+      client components importing `@storyframe/pipeline` don't pull
+      yazl/yauzl/`node:crypto` into the browser bundle — they stay
+      Node-only.
+- [x] Web route — `GET /api/stories/[id]/bundle` (gate: status === ready;
+      otherwise 409; 404 if not found). On-demand assembly: no bundle is
+      staged in R2. Streams the resulting zip with
+      `Content-Type: application/zip`, `Content-Disposition: attachment;
+      filename="<slug>.svmp"` (sanitized title), `Cache-Control: no-store`.
+- [x] Live acceptance — Paper Lantern (17031ef4): bundle downloaded 184,950
+      bytes via the GET /bundle route; `readBundle` re-opened it in 25 ms with
+      zero additional API calls; all 7 checksums recomputed and matched;
+      format_version=1 enforced; manifest shows voice_skipped=true
+      (correct), visual_skipped=false, engine.image_engine="pollinations"
+      (Phase 4 fallback lineage preserved in the manifest), 2 characters
+      (Mae, Tobias — both with portraits re-anchored to bundle paths),
+      2 scenes (scene_001, scene_002 — illustrations re-anchored), 24
+      lines counted; no audio or captions present (story had voice skipped
+      — captions/ section correctly absent). Bundle is fully self-contained.
+- [x] Suite: 51 tests pass (16 schemas + 11 svmp + 2 storage + 22 pipeline),
+      typecheck 0 errors, web lint 0 errors.
+
+Findings + gotchas (2026-08-21):
+- Next.js client-tree import hazard: any Node-only module (yazl/yauzl/
+  node:crypto) transitively reachable from `@storyframe/pipeline`'s main
+  entry will break the Turbopack browser bundle with "module not found"
+  for `node:crypto` etc. Pipeline package.json `exports` now has two entries:
+  `.` (browser-safe: sanitize, chunk, gemini, prompts, bible, analyze,
+  jobs, gate, elevenlabs, voices, narrate, images) and `./assemble`
+  (Node-only: writes the bundle). The bundle route imports
+  `@storyframe/pipeline/assemble`; client components keep importing
+  `@storyframe/pipeline`. Do NOT re-export assemble from index.ts.
+- PowerShell `Set-Content -Encoding utf8` prepends a UTF-8 BOM that breaks
+  JSON parsers (Turbopack was serving `?{` as the first bytes of
+  packages/svmp/package.json → 500s). When writing source/JSON via PS,
+  strip the BOM afterward, or write via the `write`/`edit` tool instead
+  (those don't add BOM). Recovered this session via a Node BOM-strip pass.
+- yauzl Entry has no `isDirectory` property (the @types/yauzl d.ts doesn't
+  surface one and the base yauzl never sets it for files yazl emits).
+  Dropped the guard; entry.isDirectory was always undefined anyway.
+- Worker job ASSEMBLE_JOB: intentionally NOT added. The download route
+  assembles on demand and streams the result back; no bundle is staged in
+  R2. If Phase 7 (library) wants pre-baked bundles for replay/deeplink, add
+  the worker job then and cache the .svmp in R2 keyed by story id — but
+  for MVP the on-demand path satisfies the Phase 5 acceptance criterion
+  ("a downloaded .svmp file re-opens through the reader library with zero
+  additional API calls") and avoids doubled storage.
+- Cross-package ESM execution: a one-off Node script that imports a
+  workspace package must run from inside that package dir (where pnpm
+  symlinks `@scope/name` -> `./src/index.ts`), and TS entry points need
+  `tsx` (plain `node` refuses `.ts` exports). Use
+  `.\packages\<pkg>\node_modules\.bin\tsx.CMD <script.ts> <args>` from
+  repo root.
+
 ## Phase 2 — Cast review & approval (BUILDING — gated on Phase 1 acceptance)
