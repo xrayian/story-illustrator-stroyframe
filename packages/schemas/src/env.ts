@@ -12,9 +12,16 @@ export const envSchema = z.object({
   R2_SECRET_ACCESS_KEY: z.string().min(1),
   R2_BUCKET: z.string().min(1),
   GEMINI_API_KEY: z.string().min(1),
-  ELEVENLABS_API_KEY: z.string().min(1),
+  /**
+   * Optional: without a key the voice stage is skipped per-story in the UI
+   * (11labs voice integration is optional). Required otherwise.
+   */
+  ELEVENLABS_API_KEY: z.string().min(1).optional(),
   /** Optional model overrides; the pipeline supplies sensible defaults. */
   GEMINI_ANALYSIS_MODEL: z.string().min(1).optional(),
+  /** Voice design model (default eleven_ttv_v3) and TTS model (default eleven_flash_v2_5). */
+  ELEVENLABS_VOICE_DESIGN_MODEL: z.string().min(1).optional(),
+  ELEVENLABS_TTS_MODEL: z.string().min(1).optional(),
 });
 export type Env = z.infer<typeof envSchema>;
 

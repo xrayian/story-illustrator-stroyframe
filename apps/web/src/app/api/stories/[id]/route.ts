@@ -19,6 +19,7 @@ export async function GET(
       title: stories.title,
       status: stories.status,
       source_url: stories.source_url,
+      voice_skipped: stories.voice_skipped,
       created_at: stories.created_at,
     })
     .from(stories)
@@ -58,6 +59,7 @@ export async function GET(
 
   return NextResponse.json({
     story,
+    voice_enabled: Boolean(getEnv().ELEVENLABS_API_KEY),
     characters: characterRows.map((row) => ({
       characterId: row.character_id,
       name: row.name,

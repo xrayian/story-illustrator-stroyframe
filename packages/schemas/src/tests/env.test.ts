@@ -19,9 +19,14 @@ describe("validateEnv", () => {
   });
 
   it("throws listing every missing var", () => {
-    const { GEMINI_API_KEY: _omit, ELEVENLABS_API_KEY: _omit2, ...incomplete } = fullEnv;
+    const { GEMINI_API_KEY: _omit, ...incomplete } = fullEnv;
     expect(() => validateEnv(incomplete)).toThrow(/GEMINI_API_KEY/);
-    expect(() => validateEnv(incomplete)).toThrow(/ELEVENLABS_API_KEY/);
+  });
+
+  it("accepts a env without ELEVENLABS_API_KEY (voice stage is optional)", () => {
+    const { ELEVENLABS_API_KEY: _omit, ...noVoice } = fullEnv;
+    expect(() => validateEnv(noVoice)).not.toThrow();
+    expect(validateEnv(noVoice).ELEVENLABS_API_KEY).toBeUndefined();
   });
 
   it("rejects a non-postgres NEON_CONN_STRING", () => {

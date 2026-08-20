@@ -35,3 +35,16 @@ export const approveCastRequestSchema = z.object({
     .min(1),
 });
 export type ApproveCastRequest = z.infer<typeof approveCastRequestSchema>;
+
+/** POST /api/stories/[id]/voice/previews body: design 3 previews for one character. */
+export const designPreviewsRequestSchema = z.object({
+  characterId: z.string().min(1),
+});
+export type DesignPreviewsRequest = z.infer<typeof designPreviewsRequestSchema>;
+
+/** POST /api/stories/[id]/voice/select body: turn a designed preview into a saved voice. */
+export const selectVoiceRequestSchema = z.object({
+  characterId: z.string().min(1),
+  generatedVoiceId: z.string().min(1),
+});
+export type SelectVoiceRequest = z.infer<typeof selectVoiceRequestSchema>;

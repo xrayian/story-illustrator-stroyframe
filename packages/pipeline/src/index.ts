@@ -6,3 +6,6 @@ export * from "./bible";
 export * from "./analyze";
 export * from "./jobs";
 export * from "./gate";
+export * from "./elevenlabs";
+export * from "./voices";
+export * from "./narrate";

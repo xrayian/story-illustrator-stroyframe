@@ -1,4 +1,13 @@
-import { pgEnum, pgTable, text, timestamp, uuid, integer, jsonb } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+  integer,
+  jsonb,
+} from "drizzle-orm/pg-core";
 
 export const storyStatus = pgEnum("story_status", [
   "created",
@@ -25,6 +34,8 @@ export const stories = pgTable("stories", {
   /** Sanitized/normalized text produced by the Phase 1 sanitizer. */
   sanitized_text: text("sanitized_text"),
   status: storyStatus("status").notNull().default("created"),
+  /** True when the user chose to skip the voice stage for this story. */
+  voice_skipped: boolean("voice_skipped").notNull().default(false),
   created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

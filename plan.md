@@ -95,7 +95,57 @@ Acceptance (story a31b7fcf + UI story da58e191):
 - [x] Full UI flow: review cards -> edit fields -> Approve cast -> success state
 - [x] Second story (Glass Fiddle, 5 characters incl. dog Wren) analysed + approved via UI
 
-## Next: Phase 3 — Voice design & narration (ElevenLabs Voice Design v3 + TTS)
+## Backlog — frontend follow-ups (deferred from Phase 1+2 acceptance)
+
+- [ ] StoryView polls /api/stories/[id] every 3s forever even at terminal states
+      (approved) — stop at terminal states or drop to a long interval.
+- [ ] No loading timeout — "Loading…" spins forever if the first fetch hangs.
+- [ ] No component/UI tests — only schemas/pipeline/storage suites exist.
+- [ ] Whitespace-only story text passes HTML required (server 400s later).
+- [ ] personality_traits split on "," breaks traits containing commas.
+- [ ] No aria-live / aria-busy on polling + saving states.
+
+## Phase 3 — Voice design & narration (BUILDING — gated on cast approval)
+
+Voice integration is now OPTIONAL: no ELEVENLABS_API_KEY → per-story "Skip
+narration" → story reaches ready without audio; can re-enable later (2026-08-20).
+
+Tasks:
+- [x] packages/pipeline — elevenlabs.ts client (design/create/TTS w/ timestamps,
+      retry/backoff on 429/5xx), voices.ts (description generator + narrator
+      pseudo-bible + ensureNarratorRow + speakersMissingVoices), narrate.ts
+      (per-line TTS orchestration, idempotent per line, R2 audio + timestamps,
+      asset rows, status transitions)
+- [x] Worker VOICE_TTS job (resumable; story voice_generation -> ready/failed)
+- [x] Web API: POST /voice/previews (design 3, gate-checked, re-roll replaces),
+      GET /voice/previews/audio (streams from R2), POST /voice/select (save
+      voice_id to bible), POST /voice/narrate (enqueue, 409 if running)
+- [x] Optional-voice path: ELEVENLABS_API_KEY optional in env; stories.
+      voice_skipped column (migration 0001); POST /voice/skip (gate-checked,
+      skip -> ready / unskip -> cast_review); GET detail exposes
+      voice_enabled + voice_skipped; VoiceDirector shows skip button when
+      keyless, "Re-enable narration" from the skipped ready view; worker
+      throws loudly if a narrated story has no key
+- [x] Casting Director UI: design / play / pick / re-roll per character + narrator;
+      narrate trigger; voice_generation/ready/failed status views
+- [x] Env: ELEVENLABS_API_KEY optional; ELEVENLABS_VOICE_DESIGN_MODEL +
+      ELEVENLABS_TTS_MODEL (optional)
+- [x] Live acceptance (skip path): "The Paper Lantern" (17031ef4, cast
+      approved) — skip -> ready "narration skipped" -> re-enable -> cast_review
+      with Casting Director restored. Full skip/unskip loop verified in browser.
+- [x] Paid-call error surfacing: voice routes return JSON { error } instead of
+      the dev-server HTML error page (403 from design is shown cleanly in UI)
+- [ ] Live acceptance (paid path) — BLOCKED by ElevenLabs plan tier: key works
+      (free tier, 10K chars, voice_limit 3) but POST /v1/text-to-voice/design
+      returns 403 feature_not_available "Creating a voice through the API is
+      only available on a paid plan." Acceptance story ready once plan is paid.
+
+Acceptance (pending key):
+- [ ] Full story audio track generates with distinct, consistent voices per
+      character; narrator voiced via the same flow.
+- [ ] Timestamps stored per line; manual caption sync check.
+
+## Next: Phase 4 — Visual pipeline (Nano Banana reference portraits + key scenes)
 
 Blocker + findings (2026-08-20):
 - Gemini key probe: gemini-3.1-pro-preview returns 429 (free-tier quota limit 0 —

@@ -14,7 +14,8 @@
     "@google/genai": "^2.18.0",
     "@storyframe/schemas": "workspace:*",
     "@storyframe/storage": "workspace:*",
-    "drizzle-orm": "^0.45.2"
+    "drizzle-orm": "^0.45.2",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^20",
