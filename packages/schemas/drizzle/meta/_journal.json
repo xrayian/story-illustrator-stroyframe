@@ -15,6 +15,13 @@
       "when": 1787245648750,
       "tag": "0001_nifty_dexter_bennett",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787247615996,
+      "tag": "0002_white_kingpin",
+      "breakpoints": true
     }
   ]
 }

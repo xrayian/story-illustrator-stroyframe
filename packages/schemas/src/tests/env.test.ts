@@ -10,6 +10,8 @@ const fullEnv = {
   R2_BUCKET: "storyframe",
   GEMINI_API_KEY: "g-key",
   ELEVENLABS_API_KEY: "e-key",
+  GEMINI_IMAGE_MODEL: "nano-banana-pro-preview",
+  POLLINATIONS_IMAGE_MODEL: "flux",
 };
 
 describe("validateEnv", () => {
@@ -27,6 +29,16 @@ describe("validateEnv", () => {
     const { ELEVENLABS_API_KEY: _omit, ...noVoice } = fullEnv;
     expect(() => validateEnv(noVoice)).not.toThrow();
     expect(validateEnv(noVoice).ELEVENLABS_API_KEY).toBeUndefined();
+  });
+
+  it("accepts a env without GEMINI_IMAGE_MODEL (visual stage optional/model defaulted)", () => {
+    const { GEMINI_IMAGE_MODEL: _omit, ...noImage } = fullEnv;
+    expect(() => validateEnv(noImage)).not.toThrow();
+  });
+
+  it("accepts a env without POLLINATIONS_IMAGE_MODEL (fallback defaults)", () => {
+    const { POLLINATIONS_IMAGE_MODEL: _omit, ...noPollinations } = fullEnv;
+    expect(() => validateEnv(noPollinations)).not.toThrow();
   });
 
   it("rejects a non-postgres NEON_CONN_STRING", () => {

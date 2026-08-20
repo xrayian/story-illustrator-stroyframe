@@ -36,6 +36,8 @@ export const stories = pgTable("stories", {
   status: storyStatus("status").notNull().default("created"),
   /** True when the user chose to skip the voice stage for this story. */
   voice_skipped: boolean("voice_skipped").notNull().default(false),
+  /** True when the user chose to skip the visual stage for this story. */
+  visual_skipped: boolean("visual_skipped").notNull().default(false),
   created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

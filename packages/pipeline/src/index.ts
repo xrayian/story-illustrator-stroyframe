@@ -9,3 +9,4 @@ export * from "./gate";
 export * from "./elevenlabs";
 export * from "./voices";
 export * from "./narrate";
+export * from "./images";

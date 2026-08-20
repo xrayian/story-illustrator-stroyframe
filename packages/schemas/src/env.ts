@@ -22,6 +22,17 @@ export const envSchema = z.object({
   /** Voice design model (default eleven_ttv_v3) and TTS model (default eleven_flash_v2_5). */
   ELEVENLABS_VOICE_DESIGN_MODEL: z.string().min(1).optional(),
   ELEVENLABS_TTS_MODEL: z.string().min(1).optional(),
+  /**
+   * Image generation model (default nano-banana-pro-preview). Image gen is a
+   * paid feature (free tier quotas are 0) — the visual stage is optional and
+   * can be skipped per-story; errors surface in the UI.
+   */
+  GEMINI_IMAGE_MODEL: z.string().min(1).optional(),
+  /**
+   * Free Pollinations.ai fallback model (default flux). Used automatically
+   * when Gemini image generation fails (quota/billing). No API key needed.
+   */
+  POLLINATIONS_IMAGE_MODEL: z.string().min(1).optional(),
 });
 export type Env = z.infer<typeof envSchema>;
 

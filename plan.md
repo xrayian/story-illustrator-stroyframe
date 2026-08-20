@@ -145,7 +145,53 @@ Acceptance (pending key):
       character; narrator voiced via the same flow.
 - [ ] Timestamps stored per line; manual caption sync check.
 
-## Next: Phase 4 — Visual pipeline (Nano Banana reference portraits + key scenes)
+## Phase 4 — Visual pipeline (Gemini Nano Banana + Pollinations fallback)
+
+Image generation: Gemini image models are a paid feature (free-tier keys get
+image-quota limit 0 — verified 2026-08-20), so the visual stage has a free
+Pollinations.ai fallback used automatically when Gemini fails, plus a per-story
+skip path. Stories reach `ready` without billing.
+
+Tasks:
+- [x] packages/pipeline — images.ts: generateImage (Gemini generateContent w/
+      responseModalities IMAGE + aspect ratio, 429/5xx retry, safety-block
+      errors thrown with reason), pollinationsUrl + generateImagePollinations
+      (free GET endpoint, timeout + retry, safe/nologo/seed params, stable
+      non-negative seed per char/scene id), generateWithFallback (Gemini ->
+      Pollinations on failure; combined error when both fail), fixed
+      STYLE_BIBLE, buildPortraitPrompt + buildScenePrompt (pure),
+      generateReferencePortraits (idempotent, canonical anchor per character,
+      R2 images/characters/*.{jpg|png|webp} keyed by returned mime, url on
+      bible), illustrateScenes (idempotent per scene, style bible + up to 5
+      present characters, canonical-portrait re-anchor every scene via
+      keyFromPublicPath, key vs non-key scene model split), generateStoryVisuals;
+      meta.provider (gemini|pollinations) on every asset row
+- [x] Worker IMAGE_GENERATION job (portraits -> illustrations; story
+      visual_generation -> ready/failed; passes POLLINATIONS_IMAGE_MODEL)
+- [x] Web API: POST /visuals/generate (gate: cast approved + voice done or
+      skipped; retry from failed; 409 only if visual_generation running),
+      POST /visuals/skip (skip -> ready / unskip -> cast_review),
+      GET /visuals/asset/[...key] (R2 stream, key-prefix guard,
+      extension->content-type), GET detail exposes visual_skipped + scenes[]
+      (with image urls)
+- [x] UI: VisualDirector (generate / skip / re-enable, mentions Pollinations
+      fallback, error surfacing), SceneGallery (illustrated scenes),
+      StoryView visual_generation branch, failed branch (Retry + Skip visuals)
+- [x] Env: GEMINI_IMAGE_MODEL + POLLINATIONS_IMAGE_MODEL optional (defaults
+      nano-banana-pro-preview / flux); .env.example
+- [x] Migration 0002: stories.visual_skipped
+- [x] Live acceptance (Pollinations fallback path): Paper Lantern (17031ef4)
+      — generate -> Gemini 429 -> Pollinations fallback produced real JPEG
+      portraits (Mae + Tobias, 3:4) + 2 scene illustrations (1024x576 16:9),
+      stored in R2, served via asset route, rendered in SceneGallery
+      (imgs complete, naturalWidth 1024). Job -> status ready in ~2.5 min.
+      Skip path + retry-from-failed also verified.
+
+Acceptance (pending Gemini billing — paid premium path):
+- [ ] Manual QA: >= 5 generated scenes show each character visibly
+      recognizable and consistent via Gemini re-anchoring; total image
+      spend within ceiling. (Pollinations fallback has no image re-anchoring
+      — identity consistency relies on text identity prompts only.)
 
 Blocker + findings (2026-08-20):
 - Gemini key probe: gemini-3.1-pro-preview returns 429 (free-tier quota limit 0 —

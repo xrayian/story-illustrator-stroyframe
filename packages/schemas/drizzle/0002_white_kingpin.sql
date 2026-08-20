@@ -1,0 +1,1 @@
+ALTER TABLE "stories" ADD COLUMN "visual_skipped" boolean DEFAULT false NOT NULL;

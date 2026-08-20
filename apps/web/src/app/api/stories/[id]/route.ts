@@ -20,6 +20,7 @@ export async function GET(
       status: stories.status,
       source_url: stories.source_url,
       voice_skipped: stories.voice_skipped,
+      visual_skipped: stories.visual_skipped,
       created_at: stories.created_at,
     })
     .from(stories)
@@ -47,6 +48,12 @@ export async function GET(
     .from(scenes)
     .where(eq(scenes.story_id, id));
 
+  const sceneRows = await db
+    .select({ data: scenes.data })
+    .from(scenes)
+    .where(eq(scenes.story_id, id))
+    .orderBy(scenes.order);
+
   const r2 = createR2(getEnv());
   let manifest: unknown = null;
   try {
@@ -69,6 +76,7 @@ export async function GET(
       approved: row.approved_at !== null,
     })),
     sceneCount: sceneCountRow?.count ?? 0,
+    scenes: sceneRows.map((row) => row.data as { id: string; image: unknown }),
     manifest,
   });
 }
