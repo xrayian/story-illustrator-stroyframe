@@ -5,7 +5,7 @@ config({ path: "../.env" });
 
 import { Redis } from "ioredis";
 import { validateEnv } from "@storyframe/schemas/env";
-import { QUEUE_NAME, NOOP_JOB, createQueue } from "./queue";
+import { QUEUE_NAME, NOOP_JOB, ANALYSIS_JOB, createQueue } from "./queue";
 import { createWorker } from "./worker";
 
 const env = validateEnv(process.env);
@@ -18,14 +18,34 @@ const queue = createQueue(connection);
 const worker = createWorker(connection);
 
 const enqueueNoop = process.argv.includes("--enqueue-noop");
+const analyzeArgIndex = process.argv.indexOf("--analyze-story");
+const analyzeStoryId = analyzeArgIndex >= 0 ? process.argv[analyzeArgIndex + 1] : undefined;
+
+let acceptanceJobId: string | undefined;
 
 if (enqueueNoop) {
   const job = await queue.add(NOOP_JOB, { note: "phase 0 acceptance" });
   console.log(`[worker] enqueued ${job.id} (${NOOP_JOB})`);
+  acceptanceJobId = job.id;
+}
+
+if (analyzeStoryId) {
+  const job = await queue.add(ANALYSIS_JOB, { storyId: analyzeStoryId });
+  console.log(`[worker] enqueued ${job.id} (${ANALYSIS_JOB}) for story ${analyzeStoryId}`);
+  acceptanceJobId = job.id;
+}
+
+if (acceptanceJobId) {
   worker.on("completed", async (done) => {
-    if (done.id === job.id) {
+    if (done.id === acceptanceJobId) {
       console.log("[worker] acceptance job done — exiting");
       await shutdown("acceptance complete");
+    }
+  });
+  worker.on("failed", async (failed, err) => {
+    if (failed?.id === acceptanceJobId) {
+      console.error("[worker] acceptance job failed:", err.message);
+      await shutdown("acceptance failed");
     }
   });
 }

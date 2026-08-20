@@ -1,7 +1,8 @@
 import { Worker } from "bullmq";
 import type { Redis } from "ioredis";
-import { QUEUE_NAME, NOOP_JOB } from "./queue";
+import { QUEUE_NAME, NOOP_JOB, ANALYSIS_JOB } from "./queue";
 import { noopProcessor } from "./jobs/noop";
+import { analysisProcessor } from "./jobs/analysis";
 
 export function createWorker(connection: Redis): Worker {
   const worker = new Worker(
@@ -10,6 +11,8 @@ export function createWorker(connection: Redis): Worker {
       switch (job.name) {
         case NOOP_JOB:
           return noopProcessor(job);
+        case ANALYSIS_JOB:
+          return analysisProcessor(job);
         default:
           throw new Error(`Unknown job type: ${job.name}`);
       }

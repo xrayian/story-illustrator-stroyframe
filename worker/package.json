@@ -6,12 +6,16 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
+    "seed": "tsx src/scripts/seed.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@storyframe/pipeline": "workspace:*",
     "@storyframe/schemas": "workspace:*",
+    "@storyframe/storage": "workspace:*",
     "bullmq": "^6.1.2",
     "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
     "ioredis": "^6.0.0"
   },
   "devDependencies": {

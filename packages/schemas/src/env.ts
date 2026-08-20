@@ -13,6 +13,8 @@ export const envSchema = z.object({
   R2_BUCKET: z.string().min(1),
   GEMINI_API_KEY: z.string().min(1),
   ELEVENLABS_API_KEY: z.string().min(1),
+  /** Optional model overrides; the pipeline supplies sensible defaults. */
+  GEMINI_ANALYSIS_MODEL: z.string().min(1).optional(),
 });
 export type Env = z.infer<typeof envSchema>;
 

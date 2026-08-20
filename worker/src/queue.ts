@@ -1,18 +1,16 @@
 import { Queue } from "bullmq";
 import type { Redis } from "ioredis";
 
-/** Single queue for the whole pipeline; job.name selects the stage processor. */
-export const QUEUE_NAME = "pipeline";
-
-/** Phase 0 test job — proves queue + worker + Redis round-trip. */
-export const NOOP_JOB = "noop";
-
-/** Pipeline stages (wired up in later phases). */
-export const ANALYSIS_JOB = "analysis";
-export const VOICE_DESIGN_JOB = "voice_design";
-export const VOICE_TTS_JOB = "voice_tts";
-export const IMAGE_GENERATION_JOB = "image_generation";
-export const ASSEMBLE_JOB = "assemble";
+import { QUEUE_NAME } from "@storyframe/pipeline";
+export {
+  QUEUE_NAME,
+  NOOP_JOB,
+  ANALYSIS_JOB,
+  VOICE_DESIGN_JOB,
+  VOICE_TTS_JOB,
+  IMAGE_GENERATION_JOB,
+  ASSEMBLE_JOB,
+} from "@storyframe/pipeline";
 
 export function createQueue(connection: Redis): Queue {
   return new Queue(QUEUE_NAME, { connection });
