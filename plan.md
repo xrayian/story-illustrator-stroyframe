@@ -54,4 +54,67 @@ Verification notes:
 - create-next-app emits a nested apps/web/pnpm-workspace.yaml; moved its
   ignoredBuiltDependencies to the root workspace file to keep one workspace root.
 
-## Next: Phase 1 — Ingestion & analysis engine
+## Phase 1 — Ingestion & analysis engine (COMPLETE 2026-08-20)
+
+Tasks:
+- [x] packages/pipeline — sanitize, chunk, prompts, gemini (retries), bible,
+      analyzeStory (Gemini -> StoryManifest -> DB + R2 manifest.json), gate, jobs
+- [x] packages/pipeline tests (7) — sanitize/chunk/bible/gate units
+- [x] worker analysis job + --analyze-story CLI
+- [x] Web API: POST /api/stories, GET /api/stories/[id], POST
+      /api/stories/[id]/analyze (retry), POST /api/stories/[id]/cast/approve
+- [x] Web UI: paste form, story page with polling, cast review screen
+- [x] Seed script (worker/src/scripts/seed.ts) + sample fixture story (~10 KB,
+      3 chapters, 4 named characters) in packages/pipeline/fixtures
+- [x] Typecheck (all packages) + lint (web) + tests clean; route types via next typegen
+
+Acceptance (live Gemini API, model gemini-3.5-flash):
+- [x] Real analysis on seeded story "The Lighthouse Keeper's Daughter":
+      6 characters (Martha, telegraph boy, Elias, Simon Hale, Merritt, narrator),
+      7 scenes, per-scene lines with speaker attribution, story -> cast_review
+- [x] manifest.json written to R2 and returned by GET /api/stories/[id]
+- [x] UI flow: paste -> POST -> redirect -> poll -> analyzing -> cast review screen
+- [x] Failed-analysis path: job fails loudly, story -> analysis_failed, retry re-enqueues
+- [x] API accepts 10 KB payload (201)
+
+## Phase 2 — Cast review & approval (COMPLETE 2026-08-20)
+
+Tasks:
+- [x] deriveBible: CharacterBible from manifest character; demographics UNSPECIFIED
+      unless the text explicitly states them (hard rule, never name-based inference)
+- [x] Cast review UI (editable fields, empty = unspecified, no edits required)
+- [x] Approve route: merges edits, empty demographic -> UNSPECIFIED, rebuilds
+      locked_identity_prompt, version stays 1 on first approval then +1, sets approved_at
+- [x] Gate assertCastApproved blocks any paid generation until every character approved
+
+Acceptance (story a31b7fcf + UI story da58e191):
+- [x] Gate BLOCKS before approval ("6 character(s) still pending review")
+- [x] Partial approval (3/6) still blocks; empty demographic edits normalized to unspecified
+- [x] Full approval (6/6): gate PASSES; evidence-based edits merged (e.g. Martha:
+      late fifties / woman); locked_identity_prompt built per character
+- [x] Full UI flow: review cards -> edit fields -> Approve cast -> success state
+- [x] Second story (Glass Fiddle, 5 characters incl. dog Wren) analysed + approved via UI
+
+## Next: Phase 3 — Voice design & narration (ElevenLabs Voice Design v3 + TTS)
+
+Blocker + findings (2026-08-20):
+- Gemini key probe: gemini-3.1-pro-preview returns 429 (free-tier quota limit 0 —
+  no billing on key). gemini-3.5-flash worked once, then "prepayment credits are
+  depleted". After the user topped up: flash works, pro still 429s on this plan —
+  so GEMINI_ANALYSIS_MODEL=gemini-3.5-flash stays in .env for now (analysis on
+  flash; pro model blocked until plan allows it). Re-probe periodically.
+- ADC detour reverted (2026-08-20): user confirmed Gemini API key mode only.
+  No Vertex vars remain in env schema, .env, docs, or pipeline.
+- Next 16 notes: RouteContext literal is the full route path incl. /api prefix;
+  next typegen generates it. Dev server 403s LAN-origin chunk requests unless
+  allowedDevOrigins is set (added 192.168.0.101 for local acceptance via Playwright).
+- PS 5.1 ConvertTo-Json wraps long strings in {value:...} — use node/fetch or curl
+  for API smoke tests with large bodies.
+- Drizzle gotcha: scene count must use count(scenes.id), not scenes.id aliased
+  (fixed in GET /api/stories/[id]; was returning the last scene's UUID).
+- gemini-3.5-flash analysis quality: conservative — left all demographic fields
+  unspecified even where the text explicitly states them (e.g. "a tall, gaunt
+  woman in her late fifties"). Acceptable per hard rules (never guess) but
+  under-extracts; re-check when pro is available.
+
+## Phase 2 — Cast review & approval (BUILDING — gated on Phase 1 acceptance)

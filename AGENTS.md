@@ -26,6 +26,7 @@ redistributable media bundle (.svmp).
 - plan.md is the working build log; update it as phases progress.
 - Env vars (canonical names): NEON_CONN_STRING, UPSTASH_REDIS_URL, R2_ACCOUNT_ID,
   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, GEMINI_API_KEY, ELEVENLABS_API_KEY.
+  Optional: GEMINI_ANALYSIS_MODEL (default gemini-3.1-pro-preview).
 
 ## Budget
 
