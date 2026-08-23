@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 import { StoryView } from "@/components/StoryView";
 
 export default async function StoryPage({
@@ -8,15 +9,17 @@ export default async function StoryPage({
 }) {
   const { id } = await params;
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-12">
-      <div className="mx-auto max-w-2xl">
-        <Link href="/" className="text-sm text-slate-500 hover:text-slate-700">
-          ← New story
-        </Link>
-        <div className="mt-6 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <StoryView storyId={id} />
-        </div>
-      </div>
-    </main>
+    <main className="mx-auto w-full max-w-3xl px-4 py-8 sm:py-10">
+      <Link
+        href="/stories"
+        className="inline-flex items-center gap-1 text-sm text-fg-muted transition hover:text-fg"
+      >
+        <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+        All stories
+    </Link>
+      <div className="mt-4">
+        <StoryView storyId={id} />
+    </div>
+  </main>
   );
 }

@@ -2,6 +2,18 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import {
+  AlertCircle,
+  ArrowRight,
+  CheckCircle2,
+  Download,
+  Image as ImageIcon,
+  Loader2,
+  Mic2,
+  Play,
+  RefreshCw,
+  Upload,
+} from "lucide-react";
 import type { CharacterBible, StoryManifest } from "@storyframe/schemas";
 import { CastReview } from "@/components/CastReview";
 import { VoiceDirector } from "@/components/VoiceDirector";
@@ -35,6 +47,18 @@ export interface StoryDetail {
 }
 
 const POLL_INTERVAL_MS = 3000;
+
+const STATUS_META: Record<string, { label: string; icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }> }> = {
+  created: { label: "Queued", icon: Loader2 },
+  analyzing: { label: "Analyzing", icon: Loader2 },
+  analysis_failed: { label: "Analysis failed", icon: AlertCircle },
+  cast_review: { label: "Cast review", icon: Mic2 },
+  voice_generation: { label: "Voicing", icon: Mic2 },
+  visual_generation: { label: "Illustrating", icon: ImageIcon },
+  assembling: { label: "Assembling", icon: Loader2 },
+  ready: { label: "Ready", icon: CheckCircle2 },
+  failed: { label: "Failed", icon: AlertCircle },
+};
 
 export function StoryView({ storyId }: { storyId: string }) {
   const [detail, setDetail] = useState<StoryDetail | null>(null);
@@ -71,162 +95,219 @@ export function StoryView({ storyId }: { storyId: string }) {
 
   if (error) {
     return (
-      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-        {error}
-        <button
-          onClick={() => location.reload()}
-          className="ml-2 font-semibold underline"
-        >
-          Retry
-        </button>
-      </div>
+      <div className="flex items-start gap-2 rounded-xl border border-danger/30 bg-danger-bg p-4 text-sm text-danger-fg">
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+        <div className="flex-1">
+          <p className="font-medium">{error}</p>
+          <button
+            onClick={() => location.reload()}
+            className="mt-1 text-xs font-semibold underline underline-offset-2"
+          >
+            Retry
+         </button>
+       </div>
+     </div>
     );
   }
 
   if (loading || !detail) {
-    return <p className="text-sm text-slate-500">Loading…</p>;
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-border bg-bg-elev p-6 text-sm text-fg-muted shadow-card">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+        Loading story…
+     </div>
+    );
   }
 
   const { story, characters } = detail;
-
-  if (story.status === "created" || story.status === "analyzing") {
-    return (
-      <div className="space-y-3">
-        <PipelineProgress detail={detail} />
-        <p className="text-sm font-medium text-slate-700">{story.title}</p>
-        <p className="text-sm text-slate-500">
-          Narrating the story… <span className="animate-pulse">▍</span>
-        </p>
-      </div>
-    );
-  }
-
-  if (story.status === "analysis_failed") {
-    return (
-      <div className="space-y-3">
-        <PipelineProgress detail={detail} />
-        <AnalysisFailed storyId={storyId} />
-      </div>
-    );
-  }
-
-  if (story.status === "cast_review") {
-    const allApproved = characters.every((c) => c.approved);
-    return (
-      <div className="space-y-6">
-        <PipelineProgress detail={detail} />
-        <CastReview storyId={storyId} characters={characters} storyTitle={story.title} />
-        {allApproved && (
-          <VoiceDirector
-            storyId={storyId}
-            characters={characters}
-            voiceEnabled={detail.voice_enabled}
-            voiceSkipped={story.voice_skipped}
-          />
-        )}
-      </div>
-    );
-  }
-
-  if (story.status === "voice_generation") {
-    return (
-      <div className="space-y-3">
-        <PipelineProgress detail={detail} />
-        <p className="text-sm font-medium text-slate-700">{story.title}</p>
-        <p className="text-sm text-slate-500">
-          Narrating the story… <span className="animate-pulse">▍</span>
-        </p>
-        <p className="text-xs text-slate-400">
-          Each line is being voiced with its character&apos;s voice. This can take a few
-          minutes for longer stories.
-        </p>
-      </div>
-    );
-  }
-
-  if (story.status === "visual_generation") {
-    return (
-      <div className="space-y-3">
-        <PipelineProgress detail={detail} />
-        <p className="text-sm font-medium text-slate-700">{story.title}</p>
-        <p className="text-sm text-slate-500">
-          Generating reference portraits and scene illustrations…{" "}
-          <span className="animate-pulse">▍</span>
-        </p>
-        <p className="text-xs text-slate-400">
-          One portrait per character, then one illustration per scene with the
-          canonical reference portraits re-anchored.
-        </p>
-      </div>
-    );
-  }
-
-  if (story.status === "ready") {
-    const hasVisuals = detail.scenes.some((s) => s.image);
-    return (
-      <div className="space-y-6">
-        <div className="space-y-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-          <p className="text-sm font-semibold text-emerald-800">
-            {story.voice_skipped
-              ? "Story ready — narration skipped."
-              : `Story ready — audio track generated across ${detail.sceneCount} scene${detail.sceneCount === 1 ? "" : "s"}.`}
-          </p>
-          <p className="text-sm text-emerald-700">
-            {story.voice_skipped
-              ? "You can return and cast voices later if you like."
-              : "Voice stage complete."}
-          </p>
-          {story.voice_skipped && <ReenableNarration storyId={storyId} />}
-        </div>
-        {hasVisuals ? (
-          <SceneGallery scenes={detail.scenes} />
-        ) : (
-          <VisualDirector
-            storyId={storyId}
-            scenes={detail.scenes}
-            visualSkipped={story.visual_skipped}
-          />
-        )}
-        <div className="flex flex-wrap gap-3">
-          <a
-            href={`/play/${storyId}`}
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-          >
-            Play story
-          </a>
-          <a
-            href={`/api/stories/${storyId}/bundle`}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-          >
-            Download .svmp bundle
-          </a>
-          <Link
-            href="/play"
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-          >
-            Open local .svmp file
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
-  if (story.status === "failed") {
-    return (
-      <div className="space-y-3">
-        <PipelineProgress detail={detail} />
-        <PipelineFailed storyId={storyId} />
-      </div>
-    );
-  }
+  const meta = STATUS_META[story.status] ?? { label: story.status, icon: Loader2 };
+  const StatusIcon = meta.icon;
 
   return (
-    <div className="space-y-3">
-      <p className="text-sm font-medium text-slate-700">{story.title}</p>
-      <p className="text-sm text-slate-500">
-        Pipeline stage: {story.status} (voice and visuals come online in later phases).
-      </p>
+    <div className="space-y-6">
+      <StoryHeader title={story.title} statusLabel={meta.label} StatusIcon={StatusIcon} />
+
+      {story.status === "created" || story.status === "analyzing" ? (
+        <>
+          <PipelineProgress detail={detail} />
+          <StageNotice
+            title="Analyzing the story"
+            description="Gemini is extracting characters and scenes. This usually takes under a minute."
+            pulse
+          />
+        </>
+      ) : null}
+
+      {story.status === "analysis_failed" ? (
+        <>
+          <PipelineProgress detail={detail} />
+          <AnalysisFailed storyId={storyId} />
+        </>
+      ) : null}
+
+      {story.status === "cast_review" ? (
+        <>
+          <PipelineProgress detail={detail} />
+          <CastReview storyId={storyId} characters={characters} storyTitle={story.title} />
+          {characters.every((c) => c.approved) && (
+            <VoiceDirector
+              storyId={storyId}
+              characters={characters}
+              voiceEnabled={detail.voice_enabled}
+              voiceSkipped={story.voice_skipped}
+            />
+          )}
+        </>
+      ) : null}
+
+      {story.status === "voice_generation" ? (
+        <>
+          <PipelineProgress detail={detail} />
+          <StageNotice
+            title="Narrating the story"
+            description="Each line is being voiced with its character's voice. This can take a few minutes for longer stories."
+            pulse
+          />
+        </>
+      ) : null}
+
+      {story.status === "visual_generation" || story.status === "assembling" ? (
+        <>
+          <PipelineProgress detail={detail} />
+          <StageNotice
+            title="Generating reference portraits and scene illustrations"
+            description={
+              story.status === "assembling"
+                ? "Wrapping up — packing the .svmp bundle."
+                : "One portrait per character, then one illustration per scene with the canonical reference portraits re-anchored."
+            }
+            pulse={story.status !== "assembling"}
+          />
+        </>
+      ) : null}
+
+      {story.status === "ready" ? (
+        <ReadyView detail={detail} storyId={storyId} />
+      ) : null}
+
+      {story.status === "failed" ? (
+        <>
+          <PipelineProgress detail={detail} />
+          <PipelineFailed storyId={storyId} />
+        </>
+      ) : null}
+   </div>
+  );
+}
+
+function StoryHeader({
+  title,
+  statusLabel,
+  StatusIcon,
+}: {
+  title: string;
+  statusLabel: string;
+  StatusIcon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+}) {
+  return (
+    <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
+      <div className="min-w-0">
+        <p className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">Story</p>
+        <h1 className="mt-1 font-display text-2xl font-bold tracking-tight text-fg text-balance sm:text-3xl">
+          {title}
+        </h1>
     </div>
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-bg-elev px-3 py-1 text-xs font-medium text-fg-muted shadow-card">
+        <StatusIcon className="h-3.5 w-3.5 text-primary" aria-hidden />
+        {statusLabel}
+     </span>
+   </header>
+  );
+}
+
+function StageNotice({
+  title,
+  description,
+  pulse,
+}: {
+  title: string;
+  description: string;
+  pulse?: boolean;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-border bg-bg-elev p-5 shadow-card">
+      {pulse && (
+        <span className="mt-0.5 inline-flex h-2.5 w-2.5 shrink-0 animate-pulse-soft rounded-full bg-primary" aria-hidden />
+      )}
+      <div>
+        <p className="font-display text-sm font-semibold text-fg">{title}</p>
+        <p className="mt-1 text-sm text-fg-muted">{description}</p>
+     </div>
+   </div>
+  );
+}
+
+function ReadyView({ detail, storyId }: { detail: StoryDetail; storyId: string }) {
+  const { story } = detail;
+  const hasVisuals = detail.scenes.some((s) => s.image);
+  return (
+    <div className="space-y-6">
+      <div className="space-y-3 rounded-xl border border-success/30 bg-success-bg p-5">
+        <div className="flex items-start gap-3">
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-success text-primary-fg">
+            <CheckCircle2 className="h-5 w-5" aria-hidden />
+         </span>
+          <div>
+            <p className="font-display text-base font-semibold text-success-fg">
+              {story.voice_skipped
+                ? "Story ready — narration skipped."
+                : `Story ready — audio generated across ${detail.sceneCount} scene${detail.sceneCount === 1 ? "" : "s"}.`}
+           </p>
+            <p className="mt-1 text-sm text-success-fg/80">
+              {story.voice_skipped
+                ? "You can return and cast voices later if you like."
+                : "Voice stage complete."}
+           </p>
+         </div>
+       </div>
+        {story.voice_skipped && <ReenableNarration storyId={storyId} />}
+     </div>
+
+      {hasVisuals ? (
+        <SceneGallery scenes={detail.scenes} />
+      ) : (
+        <VisualDirector
+          storyId={storyId}
+          scenes={detail.scenes}
+          visualSkipped={story.visual_skipped}
+        />
+      )}
+
+      <div className="flex flex-wrap gap-2">
+        <a
+          href={`/play/${storyId}`}
+          className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-fg shadow-lift transition hover:bg-primary-hover"
+        >
+          <Play className="h-4 w-4" aria-hidden />
+          Play story
+          <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+       </a>
+        <a
+          href={`/api/stories/${storyId}/bundle`}
+          className="inline-flex items-center gap-2 rounded-lg border border-border bg-bg-elev px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface hover:text-fg"
+        >
+          <Download className="h-4 w-4" aria-hidden />
+          Download .svmp
+       </a>
+        <Link
+          href="/play"
+          className="inline-flex items-center gap-2 rounded-lg border border-border bg-bg-elev px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface hover:text-fg"
+        >
+          <Upload className="h-4 w-4" aria-hidden />
+          Open local .svmp
+       </Link>
+     </div>
+   </div>
   );
 }
 
@@ -248,10 +329,11 @@ function ReenableNarration({ storyId }: { storyId: string }) {
     <button
       onClick={() => void reenable()}
       disabled={saving}
-      className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+      className="inline-flex items-center gap-1.5 rounded-lg bg-success px-3 py-1.5 text-sm font-semibold text-primary-fg transition hover:bg-success/90 disabled:opacity-50"
     >
+      {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Mic2 className="h-3.5 w-3.5" aria-hidden />}
       {saving ? "Updating…" : "Re-enable narration"}
-    </button>
+   </button>
   );
 }
 
@@ -267,26 +349,33 @@ function PipelineFailed({ storyId }: { storyId: string }) {
     }
   }
   return (
-    <div className="space-y-3 rounded-lg border border-red-200 bg-red-50 p-4">
-      <p className="text-sm font-semibold text-red-800">Generation failed</p>
-      <p className="text-sm text-red-700">
-        The visual stage couldn&apos;t complete (the Gemini, Hugging Face, and free
-        Pollinations image providers all failed — quota or safety-filter errors
-        surface here). Finished
-        portraits and illustrations are kept, so retrying skips them. You can
-        also skip visuals instead.
-      </p>
-      <div className="flex gap-3">
+    <div className="space-y-4 rounded-xl border border-danger/30 bg-danger-bg p-5">
+      <div className="flex items-start gap-3">
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-danger text-primary-fg">
+          <AlertCircle className="h-5 w-5" aria-hidden />
+       </span>
+        <div>
+          <p className="font-display text-base font-semibold text-danger-fg">Generation failed</p>
+          <p className="mt-1 text-sm text-danger-fg/85">
+            The visual stage couldn&apos;t complete (the Gemini, Hugging Face, and free
+            Pollinations image providers all failed — quota or safety-filter errors surface
+            here). Finished portraits and illustrations are kept, so retrying skips them.
+            You can also skip visuals instead.
+         </p>
+       </div>
+     </div>
+      <div className="flex flex-wrap gap-2">
         <button
           onClick={() => void retry()}
           disabled={retrying}
-          className="rounded-lg bg-red-700 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-danger px-3 py-1.5 text-sm font-semibold text-primary-fg transition hover:bg-danger/90 disabled:opacity-50"
         >
+          {retrying ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
           {retrying ? "Retrying…" : "Retry visuals"}
-        </button>
+       </button>
         <SkipVisualsButton storyId={storyId} />
-      </div>
-    </div>
+     </div>
+   </div>
   );
 }
 
@@ -308,10 +397,11 @@ function SkipVisualsButton({ storyId }: { storyId: string }) {
     <button
       onClick={() => void skip()}
       disabled={saving}
-      className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+      className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-bg-elev px-3 py-1.5 text-sm font-medium text-fg-muted transition hover:bg-surface hover:text-fg disabled:opacity-50"
     >
+      {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : null}
       {saving ? "Updating…" : "Skip visuals"}
-    </button>
+   </button>
   );
 }
 
@@ -327,19 +417,27 @@ function AnalysisFailed({ storyId }: { storyId: string }) {
     }
   }
   return (
-    <div className="space-y-3 rounded-lg border border-red-200 bg-red-50 p-4">
-      <p className="text-sm font-semibold text-red-800">Analysis failed</p>
-      <p className="text-sm text-red-700">
-        The story couldn&apos;t be analyzed. You can retry without being charged again for
-        completed stages.
-      </p>
+    <div className="space-y-3 rounded-xl border border-danger/30 bg-danger-bg p-5">
+      <div className="flex items-start gap-3">
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-danger text-primary-fg">
+          <AlertCircle className="h-5 w-5" aria-hidden />
+       </span>
+        <div>
+          <p className="font-display text-base font-semibold text-danger-fg">Analysis failed</p>
+          <p className="mt-1 text-sm text-danger-fg/85">
+            The story couldn&apos;t be analyzed. You can retry without being charged again for
+            completed stages.
+         </p>
+       </div>
+     </div>
       <button
         onClick={() => void retry()}
         disabled={retrying}
-        className="rounded-lg bg-red-700 px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+        className="inline-flex items-center gap-1.5 rounded-lg bg-danger px-3 py-1.5 text-sm font-semibold text-primary-fg transition hover:bg-danger/90 disabled:opacity-50"
       >
+        {retrying ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
         {retrying ? "Retrying…" : "Retry analysis"}
-      </button>
-    </div>
+     </button>
+   </div>
   );
 }

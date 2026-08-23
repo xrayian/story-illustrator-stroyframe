@@ -1,37 +1,48 @@
 "use client";
 
+import {
+  Check,
+  Image as ImageIcon,
+  Loader2,
+  Mic2,
+  Minus,
+  ScanSearch,
+  Sparkles,
+  Users,
+  X,
+  type LucideIcon,
+} from "lucide-react";
 import type { StoryDetail } from "@/components/StoryView";
 
-/** Phase 7: pipeline progress checklist rendered above the stage-specific UI. */
-const STAGES: { key: string; label: string; description: string }[] = [
-  { key: "ingest", label: "Ingest", description: "Story received" },
-  { key: "analyze", label: "Analyze", description: "Gemini extracts scenes + characters" },
-  { key: "cast", label: "Cast review", description: "You approve the inferred cast (blocking gate)" },
-  { key: "voice", label: "Voice", description: "ElevenLabs narration" },
-  { key: "visual", label: "Visuals", description: "Illustrations + reference portraits" },
-  { key: "ready", label: "Ready", description: "Bundle downloadable, player available" },
+type StageState = "pending" | "current" | "done" | "skipped" | "failed";
+
+interface Stage {
+  key: string;
+  label: string;
+  description: string;
+  icon: LucideIcon;
+}
+
+const STAGES: Stage[] = [
+  { key: "ingest", label: "Ingest", description: "Story received", icon: ScanSearch },
+  { key: "analyze", label: "Analyze", description: "Gemini extracts scenes + characters", icon: Sparkles },
+  { key: "cast", label: "Cast review", description: "You approve the inferred cast", icon: Users },
+  { key: "voice", label: "Voice", description: "ElevenLabs narration", icon: Mic2 },
+  { key: "visual", label: "Visuals", description: "Illustrations + reference portraits", icon: ImageIcon },
 ];
 
-/**
- * Maps a story row's database status onto a per-stage completion map.
- * Stages use these completion states: pending, current, done, skipped, failed.
- */
 function computeStages(status: string, voiceSkipped: boolean, visualSkipped: boolean) {
-  // Order: ingest < analyze < cast < voice < visual < ready
-  type State = "pending" | "current" | "done" | "skipped" | "failed";
-  const map: Record<string, State> = {
+  const map: Record<string, StageState> = {
     ingest: "done",
     analyze: "pending",
     cast: "pending",
     voice: "pending",
     visual: "pending",
-    ready: "pending",
   };
   if (status === "failed" || status === "analysis_failed") {
     if (status === "analysis_failed") map.analyze = "failed";
     else map.visual = "failed";
   }
-  // Order of in-flight pips vs done:
   if (status === "analyzing") {
     map.analyze = "current";
   } else if (status === "cast_review") {
@@ -41,44 +52,47 @@ function computeStages(status: string, voiceSkipped: boolean, visualSkipped: boo
     map.analyze = "done";
     map.cast = "done";
     map.voice = voiceSkipped ? "skipped" : "current";
-    if (voiceSkipped) {
-      map.visual = "pending";
-    }
   } else if (status === "visual_generation") {
     map.analyze = "done";
     map.cast = "done";
     map.voice = voiceSkipped ? "skipped" : "done";
     map.visual = visualSkipped ? "skipped" : "current";
-    if (visualSkipped) {
-      map.ready = "current";
-    }
-  } else if (status === "ready") {
+  } else if (status === "ready" || status === "assembling") {
     map.analyze = "done";
     map.cast = "done";
     map.voice = voiceSkipped ? "skipped" : "done";
     map.visual = visualSkipped ? "skipped" : "done";
-    map.ready = "done";
   }
   return map;
 }
 
-function symbolFor(state: string): string {
+function indicatorClasses(state: StageState): string {
   switch (state) {
-    case "done": return "✓";
-    case "current": return "▍";
-    case "skipped": return "—";
-    case "failed": return "!";
-    default: return "○";
+    case "done":
+      return "bg-success text-primary-fg border-success";
+    case "current":
+      return "bg-primary text-primary-fg border-primary";
+    case "skipped":
+      return "bg-surface text-fg-subtle border-border";
+    case "failed":
+      return "bg-danger text-primary-fg border-danger";
+    default:
+      return "bg-bg-elev text-fg-subtle border-border";
   }
 }
 
-function colorFor(state: string): string {
+function labelClasses(state: StageState): string {
   switch (state) {
-    case "done": return "text-emerald-600";
-    case "current": return "text-slate-900 animate-pulse";
-    case "skipped": return "text-slate-400";
-    case "failed": return "text-red-700";
-    default: return "text-slate-300";
+    case "done":
+      return "text-fg";
+    case "current":
+      return "text-fg";
+    case "failed":
+      return "text-danger-fg";
+    case "skipped":
+      return "text-fg-subtle line-through decoration-fg-subtle/50";
+    default:
+      return "text-fg-muted";
   }
 }
 
@@ -86,23 +100,51 @@ export function PipelineProgress({ detail }: { detail: StoryDetail }) {
   const { status, voice_skipped, visual_skipped } = detail.story;
   const states = computeStages(status, voice_skipped, visual_skipped);
   return (
-    <ol className="space-y-1 rounded-lg border border-slate-200 bg-white p-3 text-sm">
-      {STAGES.map((stage, i) => (
-        <li key={stage.key} className="flex items-start gap-2">
-          <span className={`mt-0.5 font-mono ${colorFor(states[stage.key])}`}>
-            {symbolFor(states[stage.key])}
-          </span>
-          <span className="flex-1">
-            <span className="font-medium text-slate-800">
-              {i + 1}. {stage.label}
-              {states[stage.key] === "skipped" && (
-                <span className="ml-1 text-xs text-slate-400">(skipped)</span>
+    <ol className="rounded-xl border border-border bg-bg-elev p-2 shadow-card">
+      {STAGES.map((stage, i) => {
+        const state = states[stage.key];
+        const Icon = stage.icon;
+        const isLast = i === STAGES.length - 1;
+        return (
+          <li key={stage.key} className="relative flex items-start gap-3 px-2 py-2">
+            <div className="relative flex flex-col items-center">
+              <span
+                aria-hidden
+                className={`inline-flex h-8 w-8 items-center justify-center rounded-full border-2 transition ${indicatorClasses(state)}`}
+              >
+                {state === "current" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                ) : state === "done" ? (
+                  <Check className="h-4 w-4" aria-hidden />
+                ) : state === "skipped" ? (
+                  <Minus className="h-4 w-4" aria-hidden />
+                ) : state === "failed" ? (
+                  <X className="h-4 w-4" aria-hidden />
+                ) : (
+                  <Icon className="h-4 w-4" aria-hidden />
+                )}
+             </span>
+              {!isLast && (
+                <span
+                  aria-hidden
+                  className={`mt-1 h-6 w-0.5 rounded-full ${
+                    state === "done" || state === "skipped" ? "bg-border-strong" : "bg-border"
+                  }`}
+                />
               )}
-            </span>
-            <span className="block text-xs text-slate-500">{stage.description}</span>
-          </span>
-        </li>
-      ))}
-    </ol>
+           </div>
+            <div className="min-w-0 flex-1 pt-1">
+              <p className={`text-sm font-semibold ${labelClasses(state)}`}>
+                {stage.label}
+                {state === "skipped" && (
+                  <span className="ml-1.5 text-xs font-normal text-fg-subtle">(skipped)</span>
+                )}
+             </p>
+              <p className="mt-0.5 text-xs text-fg-muted">{stage.description}</p>
+           </div>
+         </li>
+        );
+      })}
+   </ol>
   );
 }

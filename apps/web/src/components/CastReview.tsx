@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { AlertCircle, Check, CheckCircle2, Loader2, User } from "lucide-react";
 import { UNSPECIFIED, type CharacterBible } from "@storyframe/schemas";
 import type { StoryCharacter } from "@/components/StoryView";
 
@@ -31,7 +32,9 @@ function toEditable(bible: CharacterBible): EditableFields {
   };
 }
 
-function fromEditable(fields: EditableFields): Omit<CharacterBible, "id" | "voice_id" | "reference_image_url" | "locked_identity_prompt" | "version"> {
+function fromEditable(
+  fields: EditableFields
+): Omit<CharacterBible, "id" | "voice_id" | "reference_image_url" | "locked_identity_prompt" | "version"> {
   return {
     name: fields.name.trim(),
     role: fields.role.trim(),
@@ -66,6 +69,7 @@ export function CastReview({
 
   const allApproved = characters.every((c) => c.approved);
   const allNamed = characters.every((c) => (edits[c.characterId]?.name ?? "").trim() !== "");
+  const approvedCount = characters.filter((c) => c.approved).length;
 
   function setField(characterId: string, field: keyof EditableFields, value: string) {
     setEdits((prev) => ({
@@ -96,44 +100,52 @@ export function CastReview({
     }
   }
 
+  const inputClass =
+    "mt-1 w-full rounded-lg border border-border bg-bg px-3 py-1.5 text-sm text-fg shadow-sm placeholder:text-fg-subtle focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring";
+
   if (saved || allApproved) {
     return (
       <div className="space-y-4">
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-          <p className="text-sm font-semibold text-emerald-800">
-            Cast approved — voice and visual generation are now unlocked.
+        <div className="flex items-start gap-3 rounded-xl border border-success/30 bg-success-bg p-4">
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-success text-primary-fg">
+            <CheckCircle2 className="h-5 w-5" aria-hidden />
+      </span>
+          <div>
+            <p className="font-display text-sm font-semibold text-success-fg">
+              Cast approved — voice and visual generation are now unlocked.
           </p>
-          <p className="mt-1 text-sm text-emerald-700">
-            Phase 3 (voices) and Phase 4 (visuals) will run next in the pipeline.
+            <p className="mt-1 text-sm text-success-fg/80">
+              Voice and visual stages will run next in the pipeline.
           </p>
         </div>
-        <ul className="space-y-2">
-          {characters.map((c) => (
-            <li key={c.characterId} className="flex items-center gap-2 text-sm text-slate-700">
-              <span className="text-emerald-600">✓</span>
-              <span className="font-medium">{c.bible.name}</span>
-              <span className="text-slate-400">— {c.bible.role}</span>
-              <span className="ml-auto text-xs text-slate-400">v{c.version}</span>
-            </li>
-          ))}
-        </ul>
       </div>
+        <ul className="divide-y divide-border rounded-xl border border-border bg-bg-elev shadow-card">
+          {characters.map((c) => (
+            <li key={c.characterId} className="flex items-center gap-2 px-4 py-3 text-sm">
+              <Check className="h-4 w-4 text-success" aria-hidden />
+              <span className="font-medium text-fg">{c.bible.name}</span>
+              <span className="text-fg-muted">— {c.bible.role}</span>
+              <span className="ml-auto font-mono text-xs text-fg-subtle">v{c.version}</span>
+          </li>
+          ))}
+      </ul>
+    </div>
     );
   }
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-slate-900">Review the cast</h2>
-        <p className="mt-1 text-sm text-slate-500">
+        <h2 className="font-display text-lg font-semibold text-fg">Review the cast</h2>
+        <p className="mt-1 text-sm text-fg-muted">
           {storyTitle} — {characters.length} character{characters.length === 1 ? "" : "s"},{" "}
-          {characters.filter((c) => c.approved).length} already approved.
-        </p>
-        <p className="mt-1 text-xs text-slate-400">
+          {approvedCount} already approved.
+      </p>
+        <p className="mt-1 text-xs text-fg-subtle">
           Fields the story gave no evidence for are left empty — fill them in only if you
           want to. Nothing is generated until you approve.
-        </p>
-      </div>
+      </p>
+    </div>
 
       {characters.map((c) => {
         const f = edits[c.characterId];
@@ -144,20 +156,39 @@ export function CastReview({
             title={`${c.name}${c.approved ? " (approved)" : ""}`}
             fields={f}
             onChange={(field, value) => setField(c.characterId, field, value)}
+            inputClass={inputClass}
           />
         );
       })}
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger-fg"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          <span>{error}</span>
+   </div>
+      )}
 
       <button
         onClick={() => void approve()}
         disabled={saving || !allNamed}
-        className="w-full rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+        className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-success px-4 py-2.5 text-sm font-semibold text-primary-fg shadow-lift transition hover:bg-success/90 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {saving ? "Approving…" : "Approve cast"}
-      </button>
-    </div>
+        {saving ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            Approving…
+       </>
+        ) : (
+          <>
+            <Check className="h-4 w-4" aria-hidden />
+            Approve cast
+       </>
+        )}
+  </button>
+</div>
   );
 }
 
@@ -165,31 +196,28 @@ function CharacterCard({
   title,
   fields,
   onChange,
+  inputClass,
 }: {
   title: string;
   fields: EditableFields;
   onChange: (field: keyof EditableFields, value: string) => void;
+  inputClass: string;
 }) {
-  const inputClass =
-    "mt-1 w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500";
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-      <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
-      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <div className="rounded-2xl border border-border bg-bg-elev p-5 shadow-card">
+      <div className="flex items-center gap-2.5">
+        <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <User className="h-4 w-4" aria-hidden />
+    </span>
+        <h3 className="font-display text-sm font-semibold text-fg">{title}</h3>
+  </div>
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Name">
-          <input
-            className={inputClass}
-            value={fields.name}
-            onChange={(e) => onChange("name", e.target.value)}
-          />
-        </Field>
+          <input className={inputClass} value={fields.name} onChange={(e) => onChange("name", e.target.value)} />
+       </Field>
         <Field label="Role">
-          <input
-            className={inputClass}
-            value={fields.role}
-            onChange={(e) => onChange("role", e.target.value)}
-          />
-        </Field>
+          <input className={inputClass} value={fields.role} onChange={(e) => onChange("role", e.target.value)} />
+       </Field>
         <Field label="Apparent age range">
           <input
             className={inputClass}
@@ -197,7 +225,7 @@ function CharacterCard({
             value={fields.apparent_age_range}
             onChange={(e) => onChange("apparent_age_range", e.target.value)}
           />
-        </Field>
+       </Field>
         <Field label="Gender expression">
           <input
             className={inputClass}
@@ -205,7 +233,7 @@ function CharacterCard({
             value={fields.gender_expression}
             onChange={(e) => onChange("gender_expression", e.target.value)}
           />
-        </Field>
+       </Field>
         <Field label="Ethnicity / culture cues" className="sm:col-span-2">
           <input
             className={inputClass}
@@ -213,7 +241,7 @@ function CharacterCard({
             value={fields.ethnicity_or_culture_cues}
             onChange={(e) => onChange("ethnicity_or_culture_cues", e.target.value)}
           />
-        </Field>
+       </Field>
         <Field label="Physical description" className="sm:col-span-2">
           <textarea
             className={inputClass}
@@ -221,16 +249,16 @@ function CharacterCard({
             value={fields.physical_description}
             onChange={(e) => onChange("physical_description", e.target.value)}
           />
-        </Field>
+       </Field>
         <Field label="Personality traits (comma-separated)" className="sm:col-span-2">
           <input
             className={inputClass}
             value={fields.personality_traits}
             onChange={(e) => onChange("personality_traits", e.target.value)}
           />
-        </Field>
-      </div>
-    </div>
+       </Field>
+  </div>
+</div>
   );
 }
 
@@ -245,8 +273,8 @@ function Field({
 }) {
   return (
     <label className={className}>
-      <span className="block text-xs font-medium text-slate-600">{label}</span>
+      <span className="block text-xs font-medium text-fg-muted">{label}</span>
       {children}
-    </label>
+  </label>
   );
 }

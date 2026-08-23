@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { AlertCircle, Loader2 } from "lucide-react";
 import { parseBundle, type ParsedBundle } from "@/lib/parseBundle";
 import { ScenePlayer } from "./ScenePlayer";
 
@@ -66,13 +67,19 @@ export function BundleLoader({ storyId, file }: BundleLoaderProps) {
   }, []);
 
   if (loading) {
-    return <p className="text-sm text-slate-500">Loading bundle…</p>;
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-border bg-bg-elev p-6 text-sm text-fg-muted shadow-card">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+        Loading bundle…
+     </div>
+    );
   }
   if (error) {
     return (
-      <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-        {error}
-      </div>
+      <div className="flex items-start gap-2 rounded-xl border border-danger/30 bg-danger-bg p-4 text-sm text-danger-fg">
+        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+        <span>{error}</span>
+     </div>
     );
   }
   if (!bundle) return null;

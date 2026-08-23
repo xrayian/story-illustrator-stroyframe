@@ -1,36 +1,37 @@
 {
-    "name":  "@storyframe/web",
-    "version":  "0.1.0",
-    "private":  true,
-    "scripts":  {
-                    "dev":  "next dev",
-                    "build":  "next build",
-                    "start":  "next start",
-                    "lint":  "eslint",
-                    "typecheck":  "tsc --noEmit"
-                },
-    "dependencies":  {
-                         "@storyframe/pipeline":  "workspace:*",
-                         "@storyframe/schemas":  "workspace:*",
-                         "@storyframe/storage":  "workspace:*",
-                         "bullmq":  "^6.1.2",
-                         "dotenv":  "^17.4.2",
-                         "drizzle-orm":  "^0.45.2",
-                         "ioredis":  "^6.0.0",
-                         "next":  "16.3.1",
-                         "react":  "19.2.8",
-                         "react-dom":  "19.2.8",
-                         "jszip":  "^3.10.1"
-                     },
-    "devDependencies":  {
-                            "@tailwindcss/postcss":  "^4",
-                            "@types/node":  "^20",
-                            "@types/react":  "^19",
-                            "@types/react-dom":  "^19",
-                            "eslint":  "^9",
-                            "eslint-config-next":  "16.3.1",
-                            "tailwindcss":  "^4",
-                            "typescript":  "^5"
-                        },
-    "packageManager":  "pnpm@10.9.0"
+    "name": "@storyframe/web",
+    "version": "0.1.0",
+    "private": true,
+    "scripts": {
+        "dev": "next dev",
+        "build": "next build",
+        "start": "next start",
+        "lint": "eslint",
+        "typecheck": "tsc --noEmit"
+    },
+    "dependencies": {
+        "@storyframe/pipeline": "workspace:*",
+        "@storyframe/schemas": "workspace:*",
+        "@storyframe/storage": "workspace:*",
+        "bullmq": "^6.1.2",
+        "dotenv": "^17.4.2",
+        "drizzle-orm": "^0.45.2",
+        "ioredis": "^6.0.0",
+        "jszip": "^3.10.1",
+        "lucide-react": "^1.33.0",
+        "next": "16.3.1",
+        "react": "19.2.8",
+        "react-dom": "19.2.8"
+    },
+    "devDependencies": {
+        "@tailwindcss/postcss": "^4",
+        "@types/node": "^20",
+        "@types/react": "^19",
+        "@types/react-dom": "^19",
+        "eslint": "^9",
+        "eslint-config-next": "16.3.1",
+        "tailwindcss": "^4",
+        "typescript": "^5"
+    },
+    "packageManager": "pnpm@10.9.0"
 }

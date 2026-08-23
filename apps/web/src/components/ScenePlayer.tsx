@@ -1,6 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  ImageOff,
+  Pause,
+  Play,
+} from "lucide-react";
 import type { ParsedBundle, ParsedScene } from "@/lib/parseBundle";
 
 interface ScenePlayerProps {
@@ -103,7 +110,6 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
       if (nextIdx < bundle.scenes.length) {
         setSceneIdx(nextIdx);
         const next = bundle.scenes[nextIdx];
-        // Force the next audio to start at zero when play resumes
         if (next.audioUrl && audioRef.current) {
           audioRef.current.src = next.audioUrl;
           audioRef.current.currentTime = 0;
@@ -148,7 +154,6 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
   }, [bundle.scenes, sceneIdx]);
 
   useEffect(() => {
-    // pause any prior audio when switching scenes
     const audio = audioRef.current;
     if (audio && scene?.audioUrl) {
       audio.src = scene.audioUrl;
@@ -158,16 +163,20 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
   }, [sceneIdx]);
 
   if (!scene) {
-    return <p className="text-sm text-slate-500">No scenes to play.</p>;
+    return (
+      <div className="rounded-xl border border-border bg-bg-elev p-6 text-sm text-fg-muted shadow-card">
+        No scenes to play.
+  </div>
+    );
   }
 
   const sceneLocal = currentTime - scene.startOffset;
   const sceneProgress = scene.duration > 0 ? Math.min(1, sceneLocal / scene.duration) : 0;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {/* Stage */}
-      <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-black">
+      <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-border bg-black shadow-lift">
         {scene.imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -180,28 +189,26 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
             }}
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-slate-500">
-            <p className="text-sm">No illustration.</p>
-          </div>
-        )}
-
-        {/* Scene label */}
-        <div className="absolute left-3 top-3 rounded bg-black/60 px-2 py-1 text-xs text-white">
-          Scene {sceneIdx + 1} / {bundle.scenes.length}
-        </div>
-
-        {/* Caption overlay */}
-        {activeCue && (
-          <div className="absolute bottom-6 left-1/2 max-w-[80%] -translate-x-1/2 rounded bg-black/70 px-3 py-1.5 text-center text-sm text-white">
-            <span className="mr-2 text-xs uppercase tracking-wider text-amber-300">
-              {speakerName(bundle, activeCue.speakerId)}
-            </span>
-            <span>{activeCue.text}</span>
-          </div>
-        )}
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-fg-subtle">
+            <ImageOff className="h-8 w-8" aria-hidden />
+            <p className="text-sm">No illustration</p>
       </div>
+        )}
 
-      {/* Hidden audio for voiced bundles */}
+        <div className="absolute left-3 top-3 rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white backdrop-blur-sm">
+          Scene {sceneIdx + 1} / {bundle.scenes.length}
+    </div>
+
+        {activeCue && (
+          <div className="absolute bottom-4 left-1/2 max-w-[80%] -translate-x-1/2 rounded-lg bg-black/65 px-3 py-2 text-center text-sm text-white backdrop-blur-sm shadow-lift">
+            <span className="mr-2 text-xs font-semibold uppercase tracking-wider text-amber-300">
+              {speakerName(bundle, activeCue.speakerId)}
+      </span>
+            <span>{activeCue.text}</span>
+    </div>
+        )}
+  </div>
+
       <audio
         ref={audioRef}
         onTimeUpdate={onAudioTimeUpdate}
@@ -214,39 +221,45 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
         preload="auto"
       />
 
-      {/* Controls */}
-      <div className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
-        <div className="flex items-center gap-3">
+      <div className="space-y-3 rounded-2xl border border-border bg-bg-elev p-4 shadow-card">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setPlaying((p) => !p)}
-            className="rounded-full bg-slate-900 px-4 py-1.5 text-sm font-semibold text-white"
             disabled={currentTime >= totalDuration && !playing}
+            className="inline-flex items-center gap-1.5 rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-fg shadow-lift transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label={playing ? "Pause" : "Play"}
           >
+            {playing ? <Pause className="h-4 w-4" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}
             {playing ? "Pause" : "Play"}
-          </button>
+         </button>
           <button
             onClick={goPrev}
             disabled={sceneIdx === 0}
-            className="rounded-lg border border-slate-300 px-3 py-1 text-sm text-slate-600 disabled:opacity-30"
+            className="inline-flex items-center gap-1 rounded-lg border border-border bg-bg-elev px-2.5 py-1.5 text-sm text-fg-muted transition hover:bg-surface hover:text-fg disabled:cursor-not-allowed disabled:opacity-30"
+            aria-label="Previous scene"
           >
-            ← Prev
-          </button>
+            <ChevronLeft className="h-4 w-4" aria-hidden />
+            Prev
+  </button>
           <button
             onClick={goNext}
             disabled={sceneIdx >= bundle.scenes.length - 1}
-            className="rounded-lg border border-slate-300 px-3 py-1 text-sm text-slate-600 disabled:opacity-30"
+            className="inline-flex items-center gap-1 rounded-lg border border-border bg-bg-elev px-2.5 py-1.5 text-sm text-fg-muted transition hover:bg-surface hover:text-fg disabled:cursor-not-allowed disabled:opacity-30"
+            aria-label="Next scene"
           >
-            Next →
-          </button>
-          <div className="relative">
+            Next
+            <ChevronRight className="h-4 w-4" aria-hidden />
+  </button>
+          <div className="relative ml-auto">
             <button
               onClick={() => setSpeedMenuOpen((o) => !o)}
-              className="rounded-lg border border-slate-300 px-3 py-1 text-sm text-slate-600"
+              className="inline-flex items-center gap-1 rounded-lg border border-border bg-bg-elev px-2.5 py-1.5 text-sm text-fg-muted transition hover:bg-surface hover:text-fg"
+              aria-label="Playback speed"
             >
               {rate}x
-            </button>
+  </button>
             {speedMenuOpen && (
-              <div className="absolute right-0 z-10 mt-1 rounded border border-slate-200 bg-white p-1 shadow">
+              <div className="absolute right-0 z-10 mt-1 overflow-hidden rounded-lg border border-border bg-bg-elev p-1 shadow-lift">
                 {SPEEDS.map((s) => (
                   <button
                     key={s}
@@ -254,20 +267,22 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
                       setRate(s);
                       setSpeedMenuOpen(false);
                     }}
-                    className={`block w-full rounded px-3 py-1 text-sm text-left ${
-                      s === rate ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-100"
+                    className={`block w-full rounded px-3 py-1 text-left text-sm transition ${
+                      s === rate
+                        ? "bg-primary text-primary-fg"
+                        : "text-fg-muted hover:bg-surface hover:text-fg"
                     }`}
                   >
                     {s}x
-                  </button>
+        </button>
                 ))}
-              </div>
+     </div>
             )}
-          </div>
-        </div>
+  </div>
+  </div>
 
         <div className="flex items-center gap-3">
-          <span className="text-xs tabular-nums text-slate-500">{formatTime(currentTime)}</span>
+          <span className="font-mono text-xs tabular-nums text-fg-muted">{formatTime(currentTime)}</span>
           <input
             type="range"
             min={0}
@@ -275,16 +290,16 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
             step={0.1}
             value={currentTime}
             onChange={(e) => seek(Number(e.target.value))}
-            className="flex-1 accent-slate-900"
+            className="flex-1 accent-primary"
           />
-          <span className="text-xs tabular-nums text-slate-500">{formatTime(totalDuration)}</span>
-        </div>
+          <span className="font-mono text-xs tabular-nums text-fg-muted">{formatTime(totalDuration)}</span>
+  </div>
 
-        <p className="text-xs text-slate-400">
+        <p className="border-t border-border pt-3 text-xs text-fg-subtle">
           {bundle.manifest.title}
           {bundle.manifest.voice_skipped ? " — narration skipped (auto-advancing scenes)" : ""}
-        </p>
-      </div>
-    </div>
+  </p>
+   </div>
+ </div>
   );
 }
