@@ -442,3 +442,41 @@ Findings + gotchas (2026-08-21):
   a re-export. Keep them split intentionally; do NOT consolidate.
 
 ## Phase 2 â€” Cast review & approval (BUILDING â€” gated on Phase 1 acceptance)
+## Phase 8 — Cost controls, safety pre-checks, polish
+
+Backlog items deferred from earlier phases and follow-ups logged from
+production runs. Do not start until Phase 7 acceptance is signed off.
+
+### Local TTS fallback for non-audio files (not relevant for current pass)
+
+When a finished `.svmp` ships without an audio track (e.g. voice was
+skipped at the casting stage, or the bundle was exported before
+narration ran), the player currently auto-advances scenes with a
+wall-clock driver but stays silent. Add a browser-side TTS fallback so
+those bundles still play aloud:
+
+- Engine: Web Speech API (`window.speechSynthesis`) when available —
+  zero added cost, runs entirely client-side, no extra dep.
+- Voice assignment: map each scene's speakers to a `SpeechSynthesisVoice`
+  by the closest match on `lang` + a deterministic per-character index
+  offset, so different characters still sound distinct even without
+  ElevenLabs voices.
+- Trigger: when `bundle.manifest.voice_skipped === true` OR a scene has
+  no `audioUrl`, the ScenePlayer's wall-clock driver continues to drive
+  scene timing but also fires `speechSynthesis.speak(new SpeechSynthesisUtterance(cue.text))`
+  on each new active cue.
+- Controls: the existing speed selector also scales utterance rate
+  (`utterance.rate = selectedSpeed`); a new mute toggle in the player
+  footer suppresses TTS without pausing the auto-advance.
+- Bundle format: no `.svmp` change required. The player feature-gates
+  on a Web Speech capability check at mount; missing API -> silent
+  auto-advance, identical to today.
+- Phase 8 acceptance: opening a voice-skipped `.svmp` in any Chromium
+  browser plays cues aloud without a network call to ElevenLabs; the
+  per-character voice is recognisably different from the narrator.
+
+### Other Phase 8 backlog (carry over)
+
+- Cost estimator surfaced pre-generation (Draft $3 / Premium $10 caps).
+- Safety pre-check pass over sanitized text before paid generation.
+- README polish + first-run onboarding tooltip on the home page.
