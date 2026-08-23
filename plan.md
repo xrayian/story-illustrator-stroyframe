@@ -193,6 +193,29 @@ Acceptance (pending Gemini billing — paid premium path):
       spend within ceiling. (Pollinations fallback has no image re-anchoring
       — identity consistency relies on text identity prompts only.)
 
+Hugging Face image fallback (added 2026-08-23, replaces the NVIDIA NIM hop):
+- Hosted NVIDIA image-gen is retired for this account (June 2026 portfolio
+  deprecation): key valid on integrate.api.nvidia.com (102 models listed,
+  zero image-gen), all /v1/genai/{slug} + /v1/images/generations probes 404
+  with "Function '<uuid>': Not found for account", legacy flux.1-schnell
+  hangs. User supplied HF_TOKEN in .env instead — middle provider swapped.
+- New middle provider in the chain: Gemini -> Hugging Face -> Pollinations.
+  HF runs only when HF_TOKEN is set; both fallbacks are prompt-only
+  (diffusion endpoints accept no reference images, so no re-anchoring there).
+- Uses @huggingface/inference SDK (InferenceClient.textToImage,
+  provider: "auto" — routes to whichever provider serves the model; live
+  probe: black-forest-labs/flux.1-schnell auto-routed to nscale, real JPEG
+  returned). images.ts: defaultHfSteps (schnell/turbo -> 4, else 25),
+  generateImageHuggingFace (3-attempt transient retry incl. "loading/warm"
+  cold-start messages; mime from blob.type with mimeFromBytes magic-byte
+  sniff as fallback), generateWithFallback aggregates per-provider failures.
+- ImageProvider/providers counters now gemini|huggingface|pollinations;
+  worker passes HF_TOKEN/HF_IMAGE_MODEL (default black-forest-labs/
+  flux.1-schnell); svmp BundleManifest.image_engine union now has
+  "huggingface"; env schema keys HF_TOKEN/HF_IMAGE_MODEL optional.
+- Known quirk left as-is: assemble.ts still hardcodes engine.image_engine =
+  "pollinations"; actual per-image provider is on assets.meta.provider.
+
 Blocker + findings (2026-08-20):
 - Gemini key probe: gemini-3.1-pro-preview returns 429 (free-tier quota limit 0 —
   no billing on key). gemini-3.5-flash worked once, then "prepayment credits are

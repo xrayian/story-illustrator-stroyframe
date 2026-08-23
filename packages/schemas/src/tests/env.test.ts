@@ -12,6 +12,8 @@ const fullEnv = {
   ELEVENLABS_API_KEY: "e-key",
   GEMINI_IMAGE_MODEL: "nano-banana-pro-preview",
   POLLINATIONS_IMAGE_MODEL: "flux",
+  HF_TOKEN: "hf-key",
+  HF_IMAGE_MODEL: "black-forest-labs/flux.1-schnell",
 };
 
 describe("validateEnv", () => {
@@ -39,6 +41,12 @@ describe("validateEnv", () => {
   it("accepts a env without POLLINATIONS_IMAGE_MODEL (fallback defaults)", () => {
     const { POLLINATIONS_IMAGE_MODEL: _omit, ...noPollinations } = fullEnv;
     expect(() => validateEnv(noPollinations)).not.toThrow();
+  });
+
+  it("accepts a env without HF keys (image provider skipped in fallback chain)", () => {
+    const { HF_TOKEN: _t, HF_IMAGE_MODEL: _m, ...noHf } = fullEnv;
+    expect(() => validateEnv(noHf)).not.toThrow();
+    expect(validateEnv(noHf).HF_TOKEN).toBeUndefined();
   });
 
   it("rejects a non-postgres NEON_CONN_STRING", () => {

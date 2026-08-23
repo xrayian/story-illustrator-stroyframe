@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { GoogleGenAI } from "@google/genai";
+import { InferenceClient } from "@huggingface/inference";
 import {
   storyManifestSchema,
   type CharacterBible,
@@ -17,6 +18,15 @@ export const IMAGE_MODEL = "nano-banana-pro-preview";
 export const POLLINATIONS_MODEL = "flux";
 /** Referrer sent to Pollinations for higher anonymous rate limits. */
 export const POLLINATIONS_REFERRER = "storyframe.app";
+
+/**
+ * Hugging Face text-to-image (https://huggingface.co/models?pipeline_tag=text-to-image).
+ * Sits between Gemini and the free Pollinations endpoint in the fallback chain:
+ * prompt-only (diffusion endpoints accept no reference images, so re-anchoring
+ * is not possible there), but higher fidelity than Pollinations. The official
+ * SDK routes to whichever provider currently serves the model.
+ */
+export const HF_IMAGE_MODEL_DEFAULT = "black-forest-labs/flux.1-schnell";
 
 /** Fixed style bible applied uniformly across every illustration of a story. */
 export const STYLE_BIBLE =
@@ -112,6 +122,91 @@ export async function generateImagePollinations(
   );
 }
 
+/**
+ * Sniffs an image container's mime type from its magic bytes — used as a
+ * fallback when a provider returns bytes without a usable content type, so
+ * the right R2 object extension can still be picked.
+ */
+export function mimeFromBytes(bytes: Uint8Array): string {
+  if (bytes.length >= 2 && bytes[0] === 0x89 && bytes[1] === 0x50) return "image/png";
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) return "image/jpeg";
+  if (
+    bytes.length >= 12 &&
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+  ) {
+    return "image/webp";
+  }
+  return "application/octet-stream";
+}
+
+/**
+ * Sensible diffusion step count per model family: distilled turbo/schnell
+ * models cap at 4 steps; full models use a standard 25. Providers reject or
+ * waste compute on out-of-range steps, so this must match the chosen model.
+ */
+export function defaultHfSteps(model: string): number {
+  return /schnell|turbo/i.test(model) ? 4 : 25;
+}
+
+export interface HfImageOptions {
+  /** Deterministic output per seed (stable per character/scene id). */
+  seed?: number;
+  /** Overrides defaultHfSteps(model). */
+  steps?: number;
+}
+
+/**
+ * Generates one image via the Hugging Face Inference Providers API. The SDK
+ * picks a serving provider automatically; the response is a Blob of raw image
+ * bytes whose type is used as the mime (magic-byte sniff as fallback).
+ */
+export async function generateImageHuggingFace(
+  token: string,
+  model: string,
+  prompt: string,
+  opts: HfImageOptions = {}
+): Promise<GeneratedImage> {
+  const client = new InferenceClient(token);
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const blob = await client.textToImage(
+        {
+          provider: "auto",
+          model,
+          inputs: prompt,
+          parameters: {
+            num_inference_steps: opts.steps ?? defaultHfSteps(model),
+            ...(opts.seed !== undefined ? { seed: opts.seed } : {}),
+          },
+        },
+        { outputType: "blob" }
+      );
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      const mimeType =
+        blob.type && blob.type !== "" && blob.type !== "application/octet-stream"
+          ? blob.type
+          : mimeFromBytes(bytes);
+      if (mimeType === "application/octet-stream") {
+        throw new Error("Hugging Face returned unrecognizable image bytes");
+      }
+      return { bytes, mimeType };
+    } catch (err) {
+      lastError = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      const transient = /429|5\d\d|timeout|aborted|fetch failed|loading|warm/i.test(msg);
+      if (!transient) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 3000 * (attempt + 1)));
+    }
+  }
+
+  throw new Error(
+    `Hugging Face image generation failed after 3 attempt(s): ${String(lastError)}`
+  );
+}
+
 /** Prompt for a canonical reference portrait from a locked identity prompt. */
 export function buildPortraitPrompt(identityPrompt: string, styleBible = STYLE_BIBLE): string {
   return (
@@ -166,13 +261,26 @@ export interface ImageGenerationOptions {
   /** Overrides POLLINATIONS_MODEL (env POLLINATIONS_IMAGE_MODEL). */
   pollinationsModel?: string;
   /**
+   * Hugging Face token (env HF_TOKEN). When present, a failed Gemini
+   * generation is retried on the Hugging Face text-to-image provider before
+   * the free Pollinations fallback.
+   */
+  hfToken?: string;
+  /** Overrides HF_IMAGE_MODEL_DEFAULT (env HF_IMAGE_MODEL). */
+  hfModel?: string;
+  /**
+   * Set false to skip the Hugging Face hop in the fallback chain (HF still
+   * only runs when an hfToken is configured). Default true.
+   */
+  fallbackToHuggingFace?: boolean;
+  /**
    * When a Gemini generation fails (quota/billing/other), fall back to the
    * free Pollinations.ai endpoint with a text-only prompt. Default true.
    */
   fallbackToPollinations?: boolean;
 }
 
-export type ImageProvider = "gemini" | "pollinations";
+export type ImageProvider = "gemini" | "huggingface" | "pollinations";
 
 interface GeneratedWithProvider {
   image: GeneratedImage;
@@ -180,33 +288,53 @@ interface GeneratedWithProvider {
 }
 
 /**
- * Runs the Gemini generation; on failure, if the fallback is enabled, runs
- * the free Pollinations endpoint with a text-only prompt instead. Throws the
- * combined error when both fail.
+ * Runs the Gemini generation; on failure walks the fallback chain — the
+ * Hugging Face text-to-image provider (when a token is configured), then the
+ * free Pollinations endpoint. Both fallbacks take a text-only prompt (no
+ * reference images). Throws an error aggregating every provider that failed.
  */
 async function generateWithFallback(
   opts: ImageGenerationOptions,
   geminiCall: () => Promise<GeneratedImage>,
-  pollinationsPrompt: string,
+  fallbackPrompt: string,
   pollinationsOpts: PollinationsOptions
 ): Promise<GeneratedWithProvider> {
+  const failures: string[] = [];
   try {
     const image = await geminiCall();
     return { image, provider: "gemini" };
-  } catch (geminiErr) {
-    if (opts.fallbackToPollinations === false) throw geminiErr;
+  } catch (err) {
+    failures.push(`Gemini failed (${err instanceof Error ? err.message : String(err)})`);
+  }
+
+  if (opts.hfToken && opts.fallbackToHuggingFace !== false) {
     try {
-      const image = await generateImagePollinations(pollinationsPrompt, {
-        ...pollinationsOpts,
-        model: opts.pollinationsModel ?? POLLINATIONS_MODEL,
-      });
-      return { image, provider: "pollinations" };
-    } catch (pollinationsErr) {
-      throw new Error(
-        `Gemini failed (${geminiErr instanceof Error ? geminiErr.message : String(geminiErr)})` +
-          ` and Pollinations fallback failed (${pollinationsErr instanceof Error ? pollinationsErr.message : String(pollinationsErr)})`
+      const image = await generateImageHuggingFace(
+        opts.hfToken,
+        opts.hfModel ?? HF_IMAGE_MODEL_DEFAULT,
+        fallbackPrompt,
+        { seed: pollinationsOpts.seed }
+      );
+      return { image, provider: "huggingface" };
+    } catch (err) {
+      failures.push(
+        `Hugging Face failed (${err instanceof Error ? err.message : String(err)})`
       );
     }
+  }
+
+  if (opts.fallbackToPollinations === false) {
+    throw new Error(failures.join("; "));
+  }
+  try {
+    const image = await generateImagePollinations(fallbackPrompt, {
+      ...pollinationsOpts,
+      model: opts.pollinationsModel ?? POLLINATIONS_MODEL,
+    });
+    return { image, provider: "pollinations" };
+  } catch (err) {
+    failures.push(`Pollinations failed (${err instanceof Error ? err.message : String(err)})`);
+    throw new Error(failures.join("; "));
   }
 }
 
@@ -288,15 +416,16 @@ export interface PortraitsResult {
   characters: number;
   generated: number;
   skipped: number;
-  providers: { gemini: number; pollinations: number };
+  providers: { gemini: number; huggingface: number; pollinations: number };
 }
 
 /**
  * Phase 4a: one reference portrait per character, from the locked identity
  * prompt. Stored in R2 under images/characters/, url set on the bible.
  * Idempotent per character (portraits already present are skipped). When the
- * Gemini image model is unavailable (free-tier quota), falls back to the free
- * Pollinations.ai endpoint.
+ * Gemini image model is unavailable (free-tier quota), falls back to the
+ * Hugging Face text-to-image provider, then the free Pollinations.ai
+ * endpoint.
  */
 export async function generateReferencePortraits(
   db: Db,
@@ -314,7 +443,7 @@ export async function generateReferencePortraits(
 
   let generated = 0;
   let skipped = 0;
-  const providers: PortraitsResult["providers"] = { gemini: 0, pollinations: 0 };
+  const providers: PortraitsResult["providers"] = { gemini: 0, huggingface: 0, pollinations: 0 };
 
   for (const row of rows) {
     const bible = row.bible as CharacterBible;
@@ -367,7 +496,7 @@ export interface IllustrationResult {
   scenes: number;
   generated: number;
   skipped: number;
-  providers: { gemini: number; pollinations: number };
+  providers: { gemini: number; huggingface: number; pollinations: number };
 }
 
 /**
@@ -428,7 +557,7 @@ export async function illustrateScenes(
 
   let generated = 0;
   let skipped = 0;
-  const providers: IllustrationResult["providers"] = { gemini: 0, pollinations: 0 };
+  const providers: IllustrationResult["providers"] = { gemini: 0, huggingface: 0, pollinations: 0 };
 
   try {
     for (const [index, row] of sceneRows.entries()) {

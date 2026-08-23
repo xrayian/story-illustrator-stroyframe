@@ -270,8 +270,9 @@ function PipelineFailed({ storyId }: { storyId: string }) {
     <div className="space-y-3 rounded-lg border border-red-200 bg-red-50 p-4">
       <p className="text-sm font-semibold text-red-800">Generation failed</p>
       <p className="text-sm text-red-700">
-        The visual stage couldn&apos;t complete (both Gemini and the free Pollinations
-        fallback failed — quota or safety-filter errors surface here). Finished
+        The visual stage couldn&apos;t complete (the Gemini, Hugging Face, and free
+        Pollinations image providers all failed — quota or safety-filter errors
+        surface here). Finished
         portraits and illustrations are kept, so retrying skips them. You can
         also skip visuals instead.
       </p>

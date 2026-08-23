@@ -4,10 +4,12 @@ import {
   assetPublicPath,
   buildPortraitPrompt,
   buildScenePrompt,
-  keyFromPublicPath,
+  defaultHfSteps,
   extForMime,
-  stableSeed,
+  keyFromPublicPath,
+  mimeFromBytes,
   pollinationsUrl,
+  stableSeed,
 } from "./images";
 
 describe("assetPublicPath", () => {
@@ -69,6 +71,31 @@ describe("pollinationsUrl", () => {
     const url = pollinationsUrl("x", { width: 256, height: 256 });
     expect(url).not.toContain("seed=");
     expect(url).not.toContain("model=");
+  });
+});
+
+describe("defaultHfSteps", () => {
+  it("uses the distilled step cap for schnell/turbo models", () => {
+    expect(defaultHfSteps("black-forest-labs/flux.1-schnell")).toBe(4);
+    expect(defaultHfSteps("stabilityai/sdxl-turbo")).toBe(4);
+  });
+
+  it("uses standard steps for full models", () => {
+    expect(defaultHfSteps("black-forest-labs/flux.1-dev")).toBe(25);
+    expect(defaultHfSteps("stabilityai/stable-diffusion-3.5-large")).toBe(25);
+  });
+});
+
+describe("mimeFromBytes", () => {
+  it("detects png/jpeg/webp magic bytes", () => {
+    expect(mimeFromBytes(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]))).toBe("image/png");
+    expect(mimeFromBytes(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))).toBe("image/jpeg");
+    const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+    expect(mimeFromBytes(webp)).toBe("image/webp");
+  });
+
+  it("falls back to octet-stream for unknown bytes", () => {
+    expect(mimeFromBytes(new Uint8Array([1, 2, 3]))).toBe("application/octet-stream");
   });
 });
 

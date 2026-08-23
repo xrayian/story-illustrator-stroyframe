@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@google/genai": "^2.18.0",
+    "@huggingface/inference": "^4.13.28",
     "@storyframe/schemas": "workspace:*",
     "@storyframe/storage": "workspace:*",
     "@storyframe/svmp": "workspace:*",

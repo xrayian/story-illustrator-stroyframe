@@ -33,6 +33,17 @@ export const envSchema = z.object({
    * when Gemini image generation fails (quota/billing). No API key needed.
    */
   POLLINATIONS_IMAGE_MODEL: z.string().min(1).optional(),
+  /**
+   * Optional: Hugging Face token (https://huggingface.co/settings/tokens, hf_…).
+   * Without a token the Hugging Face image provider is simply skipped in the
+   * Gemini -> Hugging Face -> Pollinations fallback chain.
+   */
+  HF_TOKEN: z.string().min(1).optional(),
+  /**
+   * Hugging Face text-to-image model repo (default black-forest-labs/flux.1-schnell),
+   * routed to a serving provider automatically by @huggingface/inference.
+   */
+  HF_IMAGE_MODEL: z.string().min(1).optional(),
 });
 export type Env = z.infer<typeof envSchema>;
 

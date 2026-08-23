@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { validateEnv } from "@storyframe/schemas/env";
 import { createDb, stories } from "@storyframe/schemas/db";
 import { createR2 } from "@storyframe/storage";
-import { generateStoryVisuals, IMAGE_MODEL } from "@storyframe/pipeline";
+import { generateStoryVisuals, HF_IMAGE_MODEL_DEFAULT, IMAGE_MODEL } from "@storyframe/pipeline";
 import type { Job } from "bullmq";
 
 /**
@@ -22,6 +22,8 @@ export async function imageGenerationProcessor(job: Job): Promise<object> {
     const result = await generateStoryVisuals(db, r2, storyId, {
       apiKey: env.GEMINI_API_KEY,
       imageModel: env.GEMINI_IMAGE_MODEL ?? IMAGE_MODEL,
+      hfToken: env.HF_TOKEN,
+      hfModel: env.HF_IMAGE_MODEL ?? HF_IMAGE_MODEL_DEFAULT,
       pollinationsModel: env.POLLINATIONS_IMAGE_MODEL,
     });
     return {
