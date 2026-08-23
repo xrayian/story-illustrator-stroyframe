@@ -249,33 +249,30 @@ function StageNotice({
 
 function ReadyView({ detail, storyId }: { detail: StoryDetail; storyId: string }) {
   const { story } = detail;
-  const hasVisuals = detail.scenes.some((s) => s.image);
   return (
     <div className="space-y-6">
       <div className="space-y-3 rounded-xl border border-success/30 bg-success-bg p-5">
         <div className="flex items-start gap-3">
           <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-success text-primary-fg">
             <CheckCircle2 className="h-5 w-5" aria-hidden />
-         </span>
+          </span>
           <div>
             <p className="font-display text-base font-semibold text-success-fg">
               {story.voice_skipped
                 ? "Story ready — narration skipped."
                 : `Story ready — audio generated across ${detail.sceneCount} scene${detail.sceneCount === 1 ? "" : "s"}.`}
-           </p>
+            </p>
             <p className="mt-1 text-sm text-success-fg/80">
-              {story.voice_skipped
-                ? "You can return and cast voices later if you like."
-                : "Voice stage complete."}
-           </p>
-         </div>
-       </div>
-        {story.voice_skipped && <ReenableNarration storyId={storyId} />}
-     </div>
+              {story.voice_skipped ? "You can return and cast voices later if you like." : "Voice stage complete."}
+            </p>
+          </div>
+        </div>
+         {story.voice_skipped && <ReenableNarration storyId={storyId} />}
+      </div>
 
-      {hasVisuals ? (
-        <SceneGallery scenes={detail.scenes} />
-      ) : (
+      <SceneGallery scenes={detail.scenes} manifest={detail.manifest} characters={detail.characters} />
+
+      {!detail.scenes.some((s) => s.image) && (
         <VisualDirector
           storyId={storyId}
           scenes={detail.scenes}

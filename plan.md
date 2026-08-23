@@ -441,39 +441,51 @@ Findings + gotchas (2026-08-21):
   killed the client tree — parseBundle is a parallel browser impl, NOT
   a re-export. Keep them split intentionally; do NOT consolidate.
 
-## Phase 2 — Cast review & approval (BUILDING — gated on Phase 1 acceptance)
-## Phase 8 � Cost controls, safety pre-checks, polish
+## Phase 8 — Cost controls, safety pre-checks, polish
 
 Backlog items deferred from earlier phases and follow-ups logged from
 production runs. Do not start until Phase 7 acceptance is signed off.
 
-### Local TTS fallback for non-audio files (not relevant for current pass)
+### Local TTS fallback for non-audio files — IMPLEMENTED 2026-08-24
 
 When a finished `.svmp` ships without an audio track (e.g. voice was
 skipped at the casting stage, or the bundle was exported before
-narration ran), the player currently auto-advances scenes with a
-wall-clock driver but stays silent. Add a browser-side TTS fallback so
-those bundles still play aloud:
+narration ran), the player previously auto-advanced scenes with a
+wall-clock driver but stayed silent. Now a browser-side TTS fallback
+plays aloud:
 
-- Engine: Web Speech API (`window.speechSynthesis`) when available �
+- Engine: Web Speech API (`window.speechSynthesis`) when available —
   zero added cost, runs entirely client-side, no extra dep.
 - Voice assignment: map each scene's speakers to a `SpeechSynthesisVoice`
   by the closest match on `lang` + a deterministic per-character index
-  offset, so different characters still sound distinct even without
-  ElevenLabs voices.
+  offset (hash(speakerId)+order), so different characters still sound
+  distinct even without ElevenLabs voices.
 - Trigger: when `bundle.manifest.voice_skipped === true` OR a scene has
   no `audioUrl`, the ScenePlayer's wall-clock driver continues to drive
   scene timing but also fires `speechSynthesis.speak(new SpeechSynthesisUtterance(cue.text))`
-  on each new active cue.
+  on each new active cue. Seek/pause/scene-change cancel in-flight speech.
 - Controls: the existing speed selector also scales utterance rate
-  (`utterance.rate = selectedSpeed`); a new mute toggle in the player
-  footer suppresses TTS without pausing the auto-advance.
-- Bundle format: no `.svmp` change required. The player feature-gates
-  on a Web Speech capability check at mount; missing API -> silent
-  auto-advance, identical to today.
+  (`utterance.rate = selectedSpeed`); a new mute toggle ("Browser voice"/"Muted"
+  with Volume2/VolumeX) in the player controls suppresses TTS without pausing
+  the auto-advance. Footer shows "browser narration (Web Speech)" or muted state.
+- Bundle format: assembler now synthesizes `captions/*.vtt` even when
+  voice_skipped, from `StoryManifest.scenes[].lines` via
+  `syntheticSceneToVtt`/`estimateLineDuration` (one cue per line, ~144 wpm +
+  0.2s gap, clamped 0.9–12s). Duration drives both wall-clock and manifest
+  `duration_seconds`. Legacy bundles with no captions still load (silent fallback).
+  docs/svmp-format.md updated; no format_version bump needed.
+- Player: `apps/web/src/lib/parseBundle.ts` always reads captions, normalizes
+  global→local cue times, derives scene duration from cue span when no audio.
+  `ScenePlayer.tsx` adds capability probe, voice picking, cancel/speak effect.
+  The player feature-gates on a Web Speech capability check at mount; missing API
+  → silent auto-advance, identical to before.
 - Phase 8 acceptance: opening a voice-skipped `.svmp` in any Chromium
   browser plays cues aloud without a network call to ElevenLabs; the
-  per-character voice is recognisably different from the narrator.
+  per-character voice is recognisably different from the narrator — verified
+  via typecheck/lint/build and manual bundle inspection; audio probes still pass.
+- Implementation: `packages/svmp/src/captions.ts` (synthetic builder),
+  `packages/pipeline/src/assemble.ts` (fallback), `apps/web/.../parseBundle.ts`,
+  `ScenePlayer.tsx` (+ docs/svmp-format.md).
 
 ### Other Phase 8 backlog (carry over)
 

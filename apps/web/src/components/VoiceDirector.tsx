@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   AlertCircle,
   Check,
@@ -50,8 +50,14 @@ export function VoiceDirector({
   const [saving, setSaving] = useState<string | null>(null);
   const [narrating, setNarrating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pickedVoices, setPickedVoices] = useState<Record<string, string>>({});
 
-  const allCast = members.every((m) => m.bible.voice_id);
+  const effectiveVoiceId = useCallback(
+    (characterId: string, bibleVoiceId: string | null) => pickedVoices[characterId] ?? bibleVoiceId,
+    [pickedVoices]
+  );
+
+  const allCast = members.every((m) => effectiveVoiceId(m.characterId, m.bible.voice_id));
 
   async function design(characterId: string) {
     setDesigning(characterId);
@@ -83,6 +89,8 @@ export function VoiceDirector({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to save voice");
+      const voiceId = (data.voiceId as string) ?? generatedVoiceId;
+      setPickedVoices((prev) => ({ ...prev, [characterId]: voiceId }));
       setPreviews((prev) => ({ ...prev, [characterId]: [] }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save voice");
@@ -195,7 +203,7 @@ export function VoiceDirector({
     </div>
 
       {members.map((member) => {
-        const voiceId = member.bible.voice_id;
+        const voiceId = effectiveVoiceId(member.characterId, member.bible.voice_id);
         const memberPreviews = previews[member.characterId];
         return (
           <div

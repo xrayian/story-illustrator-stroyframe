@@ -27,7 +27,7 @@ mystory.svmp
 │   │   └── char_1.jpg          # canonical reference portrait (mime chooses extension)
 │   └── scene_001/
 │       └── illustration.jpg    # scene illustration
-├── captions/                   # omitted entirely when voice_skipped = true
+├── captions/                   # always present — synthetic when voice_skipped (see below)
 │   └── scene_001.vtt
 └── checksums.json              # { "path": "sha256-hex", ... } for every other entry
 ```
@@ -45,7 +45,7 @@ mystory.svmp
     "image_engine": "pollinations"          // "gemini" | "pollinations" | null (visual_skipped)
   },
   "counts": { "characters": 2, "scenes": 2, "lines": 7 },
-  "duration_seconds": 18.4,                  // sum of audio durations; 0 when voice_skipped
+  "duration_seconds": 18.4,                  // sum of audio (or synthetic) durations; ~estimated when voice_skipped
   "voice_skipped": false,
   "visual_skipped": false,
   "created_at": "2026-08-20T19:00:00.000Z"
@@ -84,8 +84,9 @@ from the ElevenLabs `with-timestamps` response:
 
 ## `captions/scene_XXX.vtt`
 
-A WebVTT file per scene, generated from the audio timestamps. Each cue spans
-one aligned word/segment of a line, prefixed with the speaker name:
+A WebVTT file per scene, generated from the audio timestamps when narration
+exists. Each cue spans one aligned word/segment of a line, prefixed with the
+speaker name:
 
 ```
 WEBVTT
@@ -96,6 +97,21 @@ WEBVTT
 00:00:00.510 --> 00:00:01.240
 [narrator] of the festival...
 ```
+
+When `voice_skipped` is true there are no audio timestamps in R2 — the
+assembler synthesizes captions from the script (`StoryManifest.scenes[].lines`)
+instead, using `syntheticSceneToVtt` (`svmp/captions.ts`) with durations
+estimated from text length (`estimateLineDuration`). One cue per line, with a
+0.2 s inter-line gap. The resulting bundle has a non-zero
+`manifest.duration_seconds` (used by the wall-clock driver) and the browser
+player's Web Speech fallback (`window.speechSynthesis`) speaks each cue aloud,
+picking a distinct `SpeechSynthesisVoice` per speaker by hash + per-character
+order offset, at the playback `rate`. No `.svmp` format version bump is needed —
+captions are simply now present for voice-skipped bundles where the old spec
+said they were omitted.
+
+Legacy voice-skipped bundles with no `captions/` entries still load — the
+player falls back to silent auto-advance when cues are absent.
 
 ## `checksums.json`
 

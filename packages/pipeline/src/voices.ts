@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   NARRATOR_ID,
   UNSPECIFIED,
@@ -65,7 +65,9 @@ export async function ensureNarratorRow(db: Db, storyId: string): Promise<void> 
   const [existing] = await db
     .select({ id: characters.id })
     .from(characters)
-    .where(eq(characters.character_id, NARRATOR_ID));
+    .where(
+      and(eq(characters.story_id, storyId), eq(characters.character_id, NARRATOR_ID))
+    );
   if (existing) return;
 
   const bible = narratorBible();

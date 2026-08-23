@@ -33,9 +33,9 @@ export interface ParsedScene {
   imageUrl: string | null;
   /** Blob URL for the scene's first narration audio (null if voice_skipped). */
   audioUrl: string | null;
-  /** VTT cues for this scene, in order. Empty if voice_skipped. */
+  /** VTT cues for this scene, in order (synthetic when voice_skipped). */
   cues: VttCue[];
-  /** Display duration of this scene, seconds (audio duration or a fixed fallback). */
+  /** Display duration of this scene, seconds (audio duration or cue span when synthesized). */
   duration: number;
   /** Bundle-wide start time of this scene, seconds. */
   startOffset: number;
@@ -106,7 +106,20 @@ export async function parseBundle(zip: Uint8Array): Promise<ParsedBundle> {
       void firstKey;
     }
 
-    const cues = manifest.voice_skipped ? [] : await readCues(`captions/${scene.id}.vtt`, await text(`captions/${scene.id}.vtt`));
+    // Always read captions — synthetic VTT is now emitted even when
+    // voice_skipped, so the local TTS fallback has text to speak.
+    const rawCues = await readCues(`captions/${scene.id}.vtt`, await text(`captions/${scene.id}.vtt`));
+    // Normalize cue times from bundle-global to scene-local so the player's
+    // `local = currentTime - startOffset` lookup works for every scene.
+    // Older bundles already encode the offset in the VTT; this makes both
+    // old and new bundles render correctly beyond scene 0.
+    const cues = rawCues.length > 0 ? rawCues.map((c) => ({ ...c, start: c.start - offset, end: c.end - offset })) : [];
+    // When there's no audio but cues exist (voice-skipped synthetic path),
+    // derive the scene duration from the cue span rather than the 6s fallback.
+    if (!audioUrl && cues.length > 0) {
+      const cueSpan = cues[cues.length - 1].end - cues[0].start;
+      if (Number.isFinite(cueSpan) && cueSpan > 0.5) duration = cueSpan;
+    }
 
     scenes.push({
       manifest: scene,
@@ -179,8 +192,15 @@ async function readCues(path: string, vtt: string | undefined): Promise<VttCue[]
     const start = parseTime(m[1]);
     const end = parseTime(m[2]);
     const text: string[] = [];
-    while (i < lines.length && lines[i].trim() !== "") {
-      text.push(lines[i].trim());
+    while (i < lines.length) {
+      const cur = lines[i].trim();
+      if (cur === "") break;
+      // Handle VTTs that are missing the required blank line between cues:
+      // if this line is a cue identifier (digits) and the next line is a
+      // timestamp, stop collecting and let the outer loop handle it.
+      if (/^\d+$/.test(cur) && lines[i + 1] && lines[i + 1].includes("-->")) break;
+      if (cur.includes("-->")) break;
+      text.push(cur);
       i++;
     }
     const joined = text.join(" ");

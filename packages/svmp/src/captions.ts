@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 /** Minimum duration of a single VTT cue in seconds. Shorter cues are merged. */
 const MIN_CUE_SECONDS = 0.4;
 
@@ -69,13 +67,13 @@ export function sceneToVtt(
   offset: number
 ): SceneCues {
   const cues: string[] = [];
-  let duration = 0;
+  let cursor = offset;
+  let totalDuration = 0;
 
   for (const line of lines) {
     const startOffset = line.startTimes[0] ?? 0;
     const endOffset = line.endTimes[line.endTimes.length - 1] ?? 0;
-    const lineDuration = endOffset - startOffset;
-    if (lineDuration > duration) duration = lineDuration;
+    const lineDuration = Math.max(0, endOffset - startOffset);
 
     let chunkStart = -1;
     let chunkEnd = -1;
@@ -93,8 +91,9 @@ export function sceneToVtt(
       }
       chunkText.push(chars);
       if (chunkEnd - chunkStart >= MIN_CUE_SECONDS || i === wordCount - 1) {
-        const cueStart = offset + chunkStart;
-        const cueEnd = offset + chunkEnd;
+        // Shift chunk from line-local (0..lineDuration) to scene-local (cursor..cursor+lineDuration)
+        const cueStart = cursor + (chunkStart - startOffset);
+        const cueEnd = cursor + (chunkEnd - startOffset);
         cues.push(
           `${formatVttTime(cueStart)} --> ${formatVttTime(cueEnd)}\n[${line.speakerId}] ${chunkText.join("")}`
         );
@@ -105,15 +104,19 @@ export function sceneToVtt(
     }
 
     if (wordCount === 0) {
-      cues.push(
-        `${formatVttTime(offset + startOffset)} --> ${formatVttTime(offset + endOffset)}\n[${line.speakerId}] ${line.text}`
-      );
+      const cueStart = cursor;
+      const cueEnd = cursor + lineDuration;
+      cues.push(`${formatVttTime(cueStart)} --> ${formatVttTime(cueEnd)}\n[${line.speakerId}] ${line.text}`);
     }
+
+    // Advance cursor for next line in same scene (audio files are concatenated end-to-end)
+    cursor += lineDuration;
+    totalDuration += lineDuration;
   }
 
   const header = "WEBVTT\n\n";
-  const body = cues.map((c, i) => `${i + 1}\n${c}\n`).join("");
-  return { sceneId, offset, vtt: header + body, duration };
+  const body = cues.map((c, i) => `${i + 1}\n${c}\n\n`).join("");
+  return { sceneId, offset, vtt: header + body, duration: totalDuration };
 }
 
 function pad2(n: number): string {
@@ -121,4 +124,64 @@ function pad2(n: number): string {
 }
 function pad3(n: number): string {
   return n < 10 ? `00${n}` : n < 100 ? `0${n}` : `${n}`;
+}
+
+// ---------------------------------------------------------------------------
+// Synthetic VTT (voice-skipped path)
+// ---------------------------------------------------------------------------
+
+/** Approx. speech rate used to estimate cue durations when no audio exists. */
+const SYNTH_WORDS_PER_SECOND = 2.4; // ~144 wpm
+const SYNTH_CHARS_PER_SECOND = 14;
+const SYNTH_GAP_SECONDS = 0.2;
+const SYNTH_MIN_LINE_SECONDS = 0.9;
+const SYNTH_MAX_LINE_SECONDS = 12;
+
+export interface SyntheticLine {
+  id: string;
+  speakerId: string;
+  text: string;
+}
+
+/**
+ * Estimate how long a line of text takes to speak aloud.
+ * Heuristic: words/2.4 + 0.35s pause, clamped to [0.9, 12].
+ */
+export function estimateLineDuration(text: string): number {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return SYNTH_MIN_LINE_SECONDS;
+  const words = trimmed.split(/\s+/).filter(Boolean).length;
+  const byWords = words / SYNTH_WORDS_PER_SECOND;
+  const byChars = trimmed.length / SYNTH_CHARS_PER_SECOND;
+  const est = Math.max(byWords, byChars * 0.55) + 0.35;
+  return Math.max(SYNTH_MIN_LINE_SECONDS, Math.min(SYNTH_MAX_LINE_SECONDS, est));
+}
+
+/**
+ * Build a WebVTT document for one scene from plain-text lines (no audio).
+ * One cue per line, with synthetic durations derived from estimateLineDuration.
+ * `offset` is the bundle-global start of this scene.
+ */
+export function syntheticSceneToVtt(
+  sceneId: string,
+  lines: SyntheticLine[],
+  offset: number
+): SceneCues {
+  const cues: string[] = [];
+  let cursor = offset;
+  for (let idx = 0; idx < lines.length; idx++) {
+    const line = lines[idx];
+    const trimmed = line.text.trim();
+    if (trimmed.length === 0) continue;
+    const dur = estimateLineDuration(trimmed);
+    const start = cursor;
+    const end = start + dur;
+    cues.push(`${formatVttTime(start)} --> ${formatVttTime(end)}\n[${line.speakerId}] ${trimmed}`);
+    cursor = end + (idx < lines.length - 1 ? SYNTH_GAP_SECONDS : 0);
+  }
+  const duration = Math.max(0, cursor - offset);
+  // Trim the trailing gap if we added one — actually keep duration as sum including gaps except last
+  const header = "WEBVTT\n\n";
+  const body = cues.map((c, i) => `${i + 1}\n${c}\n\n`).join("");
+  return { sceneId, offset, vtt: header + body, duration };
 }

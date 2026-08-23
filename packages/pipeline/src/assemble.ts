@@ -12,6 +12,7 @@ import {
   writeBundle,
   parseLineTimestamps,
   sceneToVtt,
+  syntheticSceneToVtt,
   FORMAT_VERSION,
   type BundleManifest,
   type AssetProvider,
@@ -99,7 +100,11 @@ export async function assembleBundle(
   }));
 
   // Captions: load each scene's per-line timestamps and build VTT with a
-  // cumulative offset across scenes (continuous bundle timeline).
+  // cumulative offset across scenes (continuous bundle timeline). When voice
+  // is skipped there are no timestamp assets in R2, so we synthesize captions
+  // from the story script (storyManifest) using estimateLineDuration — those
+  // power the browser's local TTS fallback with zero extra API cost.
+  const storySceneById = new Map(storyManifest.scenes.map((s) => [s.id, s.lines] as const));
   const captions: { sceneId: string; vtt: string }[] = [];
   let offset = 0;
   let durationSeconds = 0;
@@ -111,8 +116,33 @@ export async function assembleBundle(
       const tsBuf = await r2.download(tsKey);
       lines.push(parseLineTimestamps(JSON.parse(new TextDecoder().decode(tsBuf))));
     }
-    if (lines.length === 0) continue;
-    const cue = sceneToVtt(scene.id, lines, offset);
+    if (lines.length > 0) {
+      const cue = sceneToVtt(scene.id, lines, offset);
+      captions.push({ sceneId: scene.id, vtt: cue.vtt });
+      offset += cue.duration;
+      durationSeconds += cue.duration;
+      continue;
+    }
+    // No timestamp assets (voice-skipped or not-yet-narrated). Synthesize
+    // from the script so the local SpeechSynthesis fallback has captions.
+    const storyLines = storySceneById.get(scene.id);
+    if (!storyLines || storyLines.length === 0) continue;
+    const idSet = new Set(scene.line_refs);
+    // Preserve line_refs order — storyLines may already be in that order,
+    // but filter explicitly to stay robust against manifest reorder.
+    const synthetic = scene.line_refs
+      .map((id) => storyLines.find((l) => l.id === id))
+      .filter((l): l is NonNullable<typeof l> => l != null)
+      .map((l) => ({ id: l.id, speakerId: l.speaker_id, text: l.text }));
+    // Fallback: if line_refs is empty but storyLines exist (e.g. legacy),
+    // use all lines for the scene.
+    const finalSynthetic = synthetic.length > 0
+      ? synthetic
+      : storyLines.map((l) => ({ id: l.id, speakerId: l.speaker_id, text: l.text }));
+    if (finalSynthetic.length === 0) continue;
+    // Extra guard: ensure idSet membership when falling back to all lines
+    void idSet;
+    const cue = syntheticSceneToVtt(scene.id, finalSynthetic, offset);
     captions.push({ sceneId: scene.id, vtt: cue.vtt });
     offset += cue.duration;
     durationSeconds += cue.duration;
@@ -120,7 +150,12 @@ export async function assembleBundle(
 
   const assetProvider: AssetProvider = {
     async *list() {
-      for (const [bundlePath] of pathToKey) yield { path: bundlePath };
+      for (const [bundlePath] of pathToKey) {
+        // Voice previews live under voice_previews/ — ephemeral design-time
+        // assets, not part of the portable .svmp bundle.
+        if (bundlePath.startsWith("voice_previews/")) continue;
+        yield { path: bundlePath };
+      }
     },
     async get(path) {
       const r2Key = pathToKey.get(path);
