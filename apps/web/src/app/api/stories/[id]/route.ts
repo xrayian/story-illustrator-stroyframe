@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { count, eq } from "drizzle-orm";
 import { storyManifestSchema, type CharacterBible } from "@storyframe/schemas";
-import { stories, characters, scenes } from "@storyframe/schemas/db";
+import { assets, characters, scenes, stories } from "@storyframe/schemas/db";
 import { createR2, storyAssetKey } from "@storyframe/storage";
 import { getDb } from "@/lib/db";
 import { getEnv } from "@/lib/env";
@@ -79,4 +79,35 @@ export async function GET(
     scenes: sceneRows.map((row) => row.data as { id: string; image: unknown }),
     manifest,
   });
+}
+
+/**
+ * Deletes a story: every R2 object under stories/<id>/ (the manifest plus all
+ * audio, portrait, illustration, and timestamp assets), then the story row
+ * (FK cascade removes characters, scenes, assets rows).
+ */
+export async function DELETE(
+  _req: NextRequest,
+  ctx: RouteContext<"/api/stories/[id]">
+): Promise<NextResponse> {
+  const { id } = await ctx.params;
+  const db = getDb();
+
+  // Pull all asset r2_keys + the manifest key in one pass.
+  const assetRows = await db
+    .select({ r2_key: assets.r2_key })
+    .from(assets)
+    .where(eq(assets.story_id, id));
+  const r2 = createR2(getEnv());
+  const r2Keys = new Set<string>();
+  r2Keys.add(storyAssetKey(id, "manifest.json"));
+  for (const row of assetRows) if (row.r2_key.startsWith(`stories/${id}/`)) r2Keys.add(row.r2_key);
+
+  // Best-effort R2 cleanup; cascade-deletes DB rows regardless.
+  // Continue if some objects are already gone (R2 returns 404 on delete).
+  await Promise.allSettled([...r2Keys].map((key) => r2.remove(key)));
+
+  await db.delete(stories).where(eq(stories.id, id));
+
+  return NextResponse.json({ ok: true });
 }

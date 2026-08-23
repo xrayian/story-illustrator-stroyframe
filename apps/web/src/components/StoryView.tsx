@@ -6,6 +6,7 @@ import type { CharacterBible, StoryManifest } from "@storyframe/schemas";
 import { CastReview } from "@/components/CastReview";
 import { VoiceDirector } from "@/components/VoiceDirector";
 import { VisualDirector, SceneGallery } from "@/components/VisualDirector";
+import { PipelineProgress } from "@/components/PipelineProgress";
 
 export interface StoryCharacter {
   characterId: string;
@@ -91,22 +92,29 @@ export function StoryView({ storyId }: { storyId: string }) {
   if (story.status === "created" || story.status === "analyzing") {
     return (
       <div className="space-y-3">
+        <PipelineProgress detail={detail} />
         <p className="text-sm font-medium text-slate-700">{story.title}</p>
         <p className="text-sm text-slate-500">
-          Analyzing the story… <span className="animate-pulse">▍</span>
+          Narrating the story… <span className="animate-pulse">▍</span>
         </p>
       </div>
     );
   }
 
   if (story.status === "analysis_failed") {
-    return <AnalysisFailed storyId={storyId} />;
+    return (
+      <div className="space-y-3">
+        <PipelineProgress detail={detail} />
+        <AnalysisFailed storyId={storyId} />
+      </div>
+    );
   }
 
   if (story.status === "cast_review") {
     const allApproved = characters.every((c) => c.approved);
     return (
       <div className="space-y-6">
+        <PipelineProgress detail={detail} />
         <CastReview storyId={storyId} characters={characters} storyTitle={story.title} />
         {allApproved && (
           <VoiceDirector
@@ -123,6 +131,7 @@ export function StoryView({ storyId }: { storyId: string }) {
   if (story.status === "voice_generation") {
     return (
       <div className="space-y-3">
+        <PipelineProgress detail={detail} />
         <p className="text-sm font-medium text-slate-700">{story.title}</p>
         <p className="text-sm text-slate-500">
           Narrating the story… <span className="animate-pulse">▍</span>
@@ -138,6 +147,7 @@ export function StoryView({ storyId }: { storyId: string }) {
   if (story.status === "visual_generation") {
     return (
       <div className="space-y-3">
+        <PipelineProgress detail={detail} />
         <p className="text-sm font-medium text-slate-700">{story.title}</p>
         <p className="text-sm text-slate-500">
           Generating reference portraits and scene illustrations…{" "}
@@ -202,7 +212,12 @@ export function StoryView({ storyId }: { storyId: string }) {
   }
 
   if (story.status === "failed") {
-    return <PipelineFailed storyId={storyId} />;
+    return (
+      <div className="space-y-3">
+        <PipelineProgress detail={detail} />
+        <PipelineFailed storyId={storyId} />
+      </div>
+    );
   }
 
   return (
