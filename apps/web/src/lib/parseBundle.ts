@@ -29,8 +29,10 @@ export interface VttCue {
 export interface ParsedScene {
   /** Decoded SceneManifest (id, setting, mood, image ref, line_refs). */
   manifest: SceneManifest;
-  /** Blob URL for the illustration image (null if visual_skipped / not generated). */
+  /** Blob URL for the first illustration image (back-compat, null if none). */
   imageUrl: string | null;
+  /** All illustration Blob URLs for this scene (3 when Pruna 3× is used, 1 for old bundles). */
+  imageUrls: string[];
   /** Blob URL for the scene's first narration audio (null if voice_skipped). */
   audioUrl: string | null;
   /** VTT cues for this scene, in order (synthetic when voice_skipped). */
@@ -85,8 +87,21 @@ export async function parseBundle(zip: Uint8Array): Promise<ParsedBundle> {
     const data = await json<SceneManifest>(path);
     if (!data) continue;
     const scene = sceneManifestSchema.parse(data);
-
-    const imageUrl = scene.image ? toObjectUrl(await bs(scene.image.url), "image/jpeg") : null;
+    // Resolve all illustration images for this scene (3× Pruna beats). Back-compat:
+    // old bundles have `scene.image` (single), new have `scene.images` (array of 3).
+    const anyScene = scene as unknown as { images?: { key: string; url: string }[] };
+    const imageEntries: { key: string; url: string }[] = [];
+    if (anyScene.images && Array.isArray(anyScene.images) && anyScene.images.length > 0) {
+      imageEntries.push(...anyScene.images);
+    } else if (scene.image) {
+      imageEntries.push(scene.image);
+    }
+    const imageUrls: string[] = [];
+    for (const entry of imageEntries) {
+      const url = toObjectUrl(await bs(entry.url), "image/jpeg");
+      if (url) imageUrls.push(url);
+    }
+    const imageUrl = imageUrls[0] ?? null;
 
     let audioUrl: string | null = null;
     let duration = NO_VOICE_SCENE_SECONDS;
@@ -124,6 +139,7 @@ export async function parseBundle(zip: Uint8Array): Promise<ParsedBundle> {
     scenes.push({
       manifest: scene,
       imageUrl,
+      imageUrls,
       audioUrl,
       cues,
       duration,
@@ -140,7 +156,7 @@ export async function parseBundle(zip: Uint8Array): Promise<ParsedBundle> {
     totalDuration,
     dispose: () => {
       for (const s of scenes) {
-        if (s.imageUrl) URL.revokeObjectURL(s.imageUrl);
+        for (const u of s.imageUrls) URL.revokeObjectURL(u);
         if (s.audioUrl) URL.revokeObjectURL(s.audioUrl);
       }
     },

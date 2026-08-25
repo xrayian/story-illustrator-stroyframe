@@ -28,6 +28,9 @@ export const POLLINATIONS_REFERRER = "storyframe.app";
  */
 export const HF_IMAGE_MODEL_DEFAULT = "black-forest-labs/flux.1-schnell";
 
+export const PRUNA_DEFAULT_MODEL = "p-image";
+export const PRUNA_DEFAULT_BASE_URL = "https://api.pruna.ai";
+
 /** Fixed style bible applied uniformly across every illustration of a story. */
 export const STYLE_BIBLE =
   "Children's picture-book illustration, warm and rich palette, soft diffused " +
@@ -207,6 +210,124 @@ export async function generateImageHuggingFace(
   );
 }
 
+export interface PrunaImageOptions {
+  aspectRatio?: string; // "1:1", "16:9", "3:4", etc.
+  baseUrl?: string;
+}
+
+/**
+ * Generates one image via Pruna P-API (https://docs.api.pruna.ai).
+ * Uses `POST /v1/predictions` with `apikey` + `Model` headers, `Try-Sync: true`,
+ * polls `get_url` if async, then `GET generation_url` with `apikey`.
+ *
+ * Model: `p-image` (250 req/min, fast sync mode).
+ */
+export async function generateImagePruna(
+  apiKey: string,
+  model: string,
+  prompt: string,
+  opts: PrunaImageOptions
+): Promise<GeneratedImage> {
+  const baseUrl = (opts.baseUrl ?? PRUNA_DEFAULT_BASE_URL).replace(/\/$/, "");
+  const body = {
+    input: {
+      prompt,
+      aspect_ratio: opts.aspectRatio ?? "16:9",
+    },
+  };
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(`${baseUrl}/v1/predictions`, {
+        method: "POST",
+        headers: {
+          apikey: apiKey,
+          Model: model,
+          "Try-Sync": "true",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(90_000),
+      });
+
+      let generationUrl: string | null = null;
+      let statusUrl: string | null = null;
+
+      if (res.status === 200 || res.status === 201) {
+        const data = (await res.json()) as {
+          id?: string;
+          get_url?: string;
+          generation_url?: string;
+          status?: string;
+        };
+        // Sync response: succeeded immediately
+        if (data.status === "succeeded" && data.generation_url) {
+          generationUrl = data.generation_url;
+        }
+        // Async response: need to poll get_url
+        else if (data.get_url) {
+          statusUrl = data.get_url;
+        } else if (data.id) {
+          // Fallback: construct status URL from id
+          statusUrl = `${baseUrl}/v1/predictions/status/${data.id}`;
+        }
+      } else {
+        const txt = await res.text().catch(() => "");
+        throw new Error(`Pruna ${model} failed (${res.status}): ${txt.slice(0, 300)}`);
+      }
+
+      // Poll if async
+      if (!generationUrl && statusUrl) {
+        for (let poll = 0; poll < 30; poll++) {
+          await new Promise((r) => setTimeout(r, 2000));
+          const statusRes = await fetch(statusUrl, {
+            headers: { apikey: apiKey },
+            signal: AbortSignal.timeout(30_000),
+          });
+          if (!statusRes.ok) {
+            const t = await statusRes.text().catch(() => "");
+            throw new Error(`Pruna status poll failed (${statusRes.status}): ${t.slice(0, 200)}`);
+          }
+          const statusData = (await statusRes.json()) as {
+            status?: string;
+            generation_url?: string;
+            error?: string;
+            message?: string;
+          };
+          if (statusData.status === "succeeded" && statusData.generation_url) {
+            generationUrl = statusData.generation_url;
+            break;
+          }
+          if (statusData.status === "failed" || statusData.status === "canceled") {
+            throw new Error(`Pruna prediction ${statusData.status}: ${statusData.error ?? statusData.message ?? "no message"}`);
+          }
+        }
+      }
+
+      if (!generationUrl) throw new Error("Pruna did not return a generation_url");
+
+      // Download the image from delivery URL
+      const imgRes = await fetch(generationUrl, {
+        headers: { apikey: apiKey },
+        signal: AbortSignal.timeout(90_000),
+      });
+      if (!imgRes.ok) throw new Error(`Pruna delivery failed (${imgRes.status})`);
+      const mimeType = imgRes.headers.get("content-type") ?? "image/jpeg";
+      const buf = await imgRes.arrayBuffer();
+      return { bytes: new Uint8Array(buf), mimeType };
+    } catch (err) {
+      lastError = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      const transient = /429|5\d\d|timeout|aborted|fetch failed|loading|warm/i.test(msg);
+      if (!transient) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 3000 * (attempt + 1)));
+    }
+  }
+
+  throw new Error(`Pruna image generation failed after 3 attempt(s): ${String(lastError)}`);
+}
+
 /** Prompt for a canonical reference portrait from a locked identity prompt. */
 export function buildPortraitPrompt(identityPrompt: string, styleBible = STYLE_BIBLE): string {
   return (
@@ -278,9 +399,17 @@ export interface ImageGenerationOptions {
    * free Pollinations.ai endpoint with a text-only prompt. Default true.
    */
   fallbackToPollinations?: boolean;
+  /** Pruna P-API key (env PRUNA_API_KEY) — when present, Pruna is tried first. */
+  prunaApiKey?: string;
+  /** Overrides PRUNA_DEFAULT_MODEL (env PRUNA_IMAGE_MODEL). */
+  prunaModel?: string;
+  /** Overrides PRUNA_DEFAULT_BASE_URL (env PRUNA_API_BASE_URL). */
+  prunaBaseUrl?: string;
+  /** Set false to skip the Pruna hop. Default true (when prunaApiKey is set). */
+  fallbackToPruna?: boolean;
 }
 
-export type ImageProvider = "gemini" | "huggingface" | "pollinations";
+export type ImageProvider = "pruna" | "gemini" | "huggingface" | "pollinations";
 
 interface GeneratedWithProvider {
   image: GeneratedImage;
@@ -288,10 +417,10 @@ interface GeneratedWithProvider {
 }
 
 /**
- * Runs the Gemini generation; on failure walks the fallback chain — the
- * Hugging Face text-to-image provider (when a token is configured), then the
- * free Pollinations endpoint. Both fallbacks take a text-only prompt (no
- * reference images). Throws an error aggregating every provider that failed.
+ * Runs Pruna (primary) → Gemini → Hugging Face → Pollinations fallback chain.
+ * Pruna is tried first when `prunaApiKey` is set; all providers after that are
+ * fallbacks. Both Hugging Face and Pollinations are text-only (no ref images).
+ * Throws an error aggregating every provider that failed.
  */
 async function generateWithFallback(
   opts: ImageGenerationOptions,
@@ -300,6 +429,26 @@ async function generateWithFallback(
   pollinationsOpts: PollinationsOptions
 ): Promise<GeneratedWithProvider> {
   const failures: string[] = [];
+
+  if (opts.prunaApiKey && opts.fallbackToPruna !== false) {
+    try {
+      // Convert pixel dimensions to Pruna aspect_ratio
+      const aspectRatio = pollinationsOpts.width > pollinationsOpts.height ? "16:9" : "3:4";
+      const image = await generateImagePruna(
+        opts.prunaApiKey,
+        opts.prunaModel ?? PRUNA_DEFAULT_MODEL,
+        fallbackPrompt,
+        {
+          aspectRatio,
+          baseUrl: opts.prunaBaseUrl,
+        }
+      );
+      return { image, provider: "pruna" };
+    } catch (err) {
+      failures.push(`Pruna failed (${err instanceof Error ? err.message : String(err)})`);
+    }
+  }
+
   try {
     const image = await geminiCall();
     return { image, provider: "gemini" };
@@ -416,7 +565,7 @@ export interface PortraitsResult {
   characters: number;
   generated: number;
   skipped: number;
-  providers: { gemini: number; huggingface: number; pollinations: number };
+  providers: { pruna: number; gemini: number; huggingface: number; pollinations: number };
 }
 
 /**
@@ -443,7 +592,7 @@ export async function generateReferencePortraits(
 
   let generated = 0;
   let skipped = 0;
-  const providers: PortraitsResult["providers"] = { gemini: 0, huggingface: 0, pollinations: 0 };
+  const providers: PortraitsResult["providers"] = { pruna: 0, gemini: 0, huggingface: 0, pollinations: 0 };
 
   for (const row of rows) {
     const bible = row.bible as CharacterBible;
@@ -496,7 +645,7 @@ export interface IllustrationResult {
   scenes: number;
   generated: number;
   skipped: number;
-  providers: { gemini: number; huggingface: number; pollinations: number };
+  providers: { pruna: number; gemini: number; huggingface: number; pollinations: number };
 }
 
 /**
@@ -557,12 +706,16 @@ export async function illustrateScenes(
 
   let generated = 0;
   let skipped = 0;
-  const providers: IllustrationResult["providers"] = { gemini: 0, huggingface: 0, pollinations: 0 };
+  const providers: IllustrationResult["providers"] = { pruna: 0, gemini: 0, huggingface: 0, pollinations: 0 };
 
   try {
     for (const [index, row] of sceneRows.entries()) {
       const scene = row.data as SceneManifest;
-      if (scene.image) {
+      // Skip only if all 3 beats already exist (idempotent for 3×)
+      const hasAllBeats = Array.isArray((scene as unknown as { images?: unknown }).images)
+        ? ((scene as unknown as { images: unknown[] }).images.length >= 3)
+        : !!scene.image;
+      if (hasAllBeats) {
         skipped++;
         continue;
       }
@@ -581,60 +734,108 @@ export async function illustrateScenes(
         if (attachPortraits && portrait) refImages.push(portrait);
       }
 
-      const prompt = buildScenePrompt({
-        title: manifest.title,
-        setting: scene.setting,
-        timeOfDay: scene.time_of_day,
-        mood: scene.mood,
-        isKeyScene: scene.is_key_scene,
-        identityLines,
-        attachPortraits,
-      });
-      const fallbackPrompt = buildScenePrompt({
-        title: manifest.title,
-        setting: scene.setting,
-        timeOfDay: scene.time_of_day,
-        mood: scene.mood,
-        isKeyScene: scene.is_key_scene,
-        identityLines,
-        attachPortraits: false,
-      });
+      // Dialogue-driven beats: split this scene's lines into start/middle/end thirds
+      // so the 3 illustrations are story-related, not just seed variants.
+      const manifestScene = manifest.scenes.find((s) => s.id === scene.id);
+      const allLines = manifestScene?.lines ?? [];
+      const beatCount = 3;
+      const beatSize = Math.max(1, Math.ceil(allLines.length / beatCount));
+      const beats = [
+        { label: "start", lines: allLines.slice(0, beatSize) },
+        { label: "middle", lines: allLines.slice(beatSize, beatSize * 2) },
+        { label: "end", lines: allLines.slice(beatSize * 2) },
+      ];
 
       const sceneModel = scene.is_key_scene ? model : nonKeyModel;
-      const { image, provider } = await generateWithFallback(
-        opts,
-        () => generateImage(opts.apiKey, sceneModel, prompt, refImages, "16:9"),
-        fallbackPrompt,
-        { width: 1280, height: 720, seed: stableSeed(scene.id) }
-      );
+      const existingImages = (scene as unknown as { images?: { key: string; url: string }[] }).images ?? [];
+      const newImages: { key: string; url: string }[] = [...existingImages];
 
-      const key = storyAssetKey(
-        storyId,
-        "images",
-        scene.id,
-        `illustration.${extForMime(image.mimeType)}`
-      );
-      await r2.upload(key, image.bytes, image.mimeType);
+      for (let beatIdx = 0; beatIdx < beatCount; beatIdx++) {
+        // Keep the same canonical portraits for all 3 beats of this scene
+        if (newImages[beatIdx]) continue; // already generated
 
-      const updatedScene: SceneManifest = {
+        const beat = beats[beatIdx];
+        const beatDialogue = beat.lines
+          .map((l) => {
+            const speaker = charRows.find((c) => c.character_id === l.speaker_id)?.bible as CharacterBible | undefined;
+            const name = speaker?.name ?? l.speaker_id;
+            return `${name}: "${l.text}"`;
+          })
+          .join(" ")
+          .slice(0, 600);
+
+        // Beat-specific identity lines: only characters who speak in this beat + present cast
+        const beatSpeakers = new Set(beat.lines.map((l) => l.speaker_id));
+        const beatIdentityLines = identityLines.filter((line) =>
+          [...beatSpeakers, ...present].some((id) => {
+            const ch = charRows.find((c) => c.character_id === id);
+            return ch && line.includes(ch.name);
+          })
+        );
+        const effectiveIdentityLines = beatIdentityLines.length > 0 ? beatIdentityLines : identityLines;
+
+        const beatPrompt = buildScenePrompt({
+          title: manifest.title,
+          setting: `${scene.setting} — ${beat.label} of scene`,
+          timeOfDay: scene.time_of_day,
+          mood: scene.mood,
+          isKeyScene: scene.is_key_scene,
+          identityLines: effectiveIdentityLines,
+          attachPortraits,
+        });
+        const beatPromptWithDialogue = beatDialogue ? `${beatPrompt}\n\nBeat dialogue: ${beatDialogue}` : beatPrompt;
+
+        const fallbackPrompt = buildScenePrompt({
+          title: manifest.title,
+          setting: `${scene.setting} — ${beat.label} of scene`,
+          timeOfDay: scene.time_of_day,
+          mood: scene.mood,
+          isKeyScene: scene.is_key_scene,
+          identityLines: effectiveIdentityLines,
+          attachPortraits: false,
+        });
+        const fallbackWithDialogue = beatDialogue ? `${fallbackPrompt}\n\nBeat dialogue: ${beatDialogue}` : fallbackPrompt;
+
+        const { image, provider } = await generateWithFallback(
+          opts,
+          () => generateImage(opts.apiKey, sceneModel, beatPromptWithDialogue, refImages, "16:9"),
+          fallbackWithDialogue,
+          { width: 1280, height: 720, seed: stableSeed(`${scene.id}:beat:${beatIdx}`) }
+        );
+
+        const key = storyAssetKey(
+          storyId,
+          "images",
+          scene.id,
+          `illustration_${beatIdx}.${extForMime(image.mimeType)}`
+        );
+        await r2.upload(key, image.bytes, image.mimeType);
+
+        const url = assetPublicPath(storyId, key);
+        newImages[beatIdx] = { key, url };
+
+        await db.insert(assets).values({
+          story_id: storyId,
+          kind: "image",
+          r2_key: key,
+          content_type: image.mimeType,
+          size_bytes: image.bytes.length,
+          meta: { purpose: "illustration", sceneId: scene.id, beat: beatIdx, model: sceneModel, provider },
+        });
+        generated++;
+        providers[provider]++;
+      }
+
+      // Persist: keep `image` (first) for back-compat, plus `images[]` for 3×
+      const updatedScene = {
         ...scene,
-        image: { key, url: assetPublicPath(storyId, key) },
-      };
+        image: newImages[0] ?? scene.image,
+        images: newImages,
+      } as SceneManifest & { images: { key: string; url: string }[] };
       await db
         .update(scenes)
-        .set({ data: updatedScene, updated_at: new Date() })
+        .set({ data: updatedScene as unknown as SceneManifest, updated_at: new Date() })
         .where(eq(scenes.id, row.id));
-
-      await db.insert(assets).values({
-        story_id: storyId,
-        kind: "image",
-        r2_key: key,
-        content_type: image.mimeType,
-        size_bytes: image.bytes.length,
-        meta: { purpose: "illustration", sceneId: scene.id, model: sceneModel, provider },
-      });
-      generated++;
-      providers[provider]++;
     }
 
     await db

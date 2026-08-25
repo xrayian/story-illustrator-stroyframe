@@ -16,6 +16,8 @@ import type { StoryManifest } from "@storyframe/schemas";
 interface SceneSummary {
   id: string;
   image: { key: string; url: string } | null;
+  /** 3× beat images when Pruna 3× is used (start/middle/end). */
+  images?: { key: string; url: string }[];
 }
 
 /**
@@ -102,7 +104,7 @@ export function VisualDirector({
           <p className="mt-1 text-sm text-fg-muted">
             Generate a canonical reference portrait for each character, then an illustration
             for every scene (style bible + re-anchored portraits). Images route through
-            Gemini, Hugging Face, or the free Pollinations endpoint — errors surface here
+            Pruna, Gemini, Hugging Face, or the free Pollinations endpoint — errors surface here
             rather than failing silently.
        </p>
       </div>
@@ -156,7 +158,7 @@ export function SceneGallery({
   const manifestById = new Map<string, (typeof manifest extends null | undefined ? never : NonNullable<typeof manifest>["scenes"][number])>();
   if (manifest) for (const s of manifest.scenes) manifestById.set(s.id, s as never);
 
-  const illustratedCount = scenes.filter((s) => s.image).length;
+  const illustratedCount = scenes.filter((s) => s.image || (s.images && s.images.length > 0)).length;
 
   return (
     <div className="space-y-3">
@@ -178,7 +180,30 @@ export function SceneGallery({
               key={scene.id}
               className="group overflow-hidden rounded-2xl border border-border bg-bg-elev shadow-card transition hover:-translate-y-0.5 hover:shadow-lift"
             >
-              {scene.image?.url ? (
+              {/* 3-image beat gallery or single image fallback */}
+              {scene.images && scene.images.length > 1 ? (
+                <div className="grid grid-cols-3 gap-0.5">
+                  {scene.images.map((img, i) => (
+                    <div key={i} className="relative aspect-video">
+                      {img.url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={img.url}
+                          alt={`Scene ${scene.id} — ${i === 0 ? "start" : i === 1 ? "middle" : "end"}`}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center bg-surface text-fg-subtle">
+                          <ImageIcon className="h-4 w-4" aria-hidden />
+                        </div>
+                      )}
+                      <span className="absolute bottom-0.5 left-0.5 rounded bg-black/60 px-1 py-0.5 text-[10px] font-medium text-white/90">
+                        {i === 0 ? "Start" : i === 1 ? "Middle" : "End"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : scene.image?.url ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={scene.image.url}
@@ -194,8 +219,8 @@ export function SceneGallery({
               <figcaption className="space-y-1.5 px-3 py-3">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-mono text-xs font-semibold text-fg">{scene.id}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${scene.image ? "bg-success-bg text-success-fg" : "bg-surface text-fg-muted"}`}>
-                    {scene.image ? "illustrated" : "pending"}
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${(scene.image || (scene.images && scene.images.length > 0)) ? "bg-success-bg text-success-fg" : "bg-surface text-fg-muted"}`}>
+                    {scene.image || (scene.images && scene.images.length > 0) ? "illustrated" : "pending"}
                   </span>
                 </div>
                 {m ? (

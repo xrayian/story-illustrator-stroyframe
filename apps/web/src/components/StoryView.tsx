@@ -12,6 +12,7 @@ import {
   Mic2,
   Play,
   RefreshCw,
+  Sparkles,
   Upload,
 } from "lucide-react";
 import type { CharacterBible, StoryManifest } from "@storyframe/schemas";
@@ -37,12 +38,19 @@ export interface StoryDetail {
     source_url: string | null;
     voice_skipped: boolean;
     visual_skipped: boolean;
+    analysis_model: string | null;
+    analysis_provider: string | null;
     created_at: string;
   };
   voice_enabled: boolean;
+  showAnalysisModel: boolean;
+  configuredAnalysisModel: string;
+  fallbackAnalysisModel: string;
+  analysisModel: string | null;
+  analysisProvider: string | null;
   characters: StoryCharacter[];
   sceneCount: number;
-  scenes: Array<{ id: string; image: { key: string; url: string } | null }>;
+  scenes: Array<{ id: string; image: { key: string; url: string } | null; images?: { key: string; url: string }[] }>;
   manifest: StoryManifest | null;
 }
 
@@ -122,17 +130,32 @@ export function StoryView({ storyId }: { storyId: string }) {
   const { story, characters } = detail;
   const meta = STATUS_META[story.status] ?? { label: story.status, icon: Loader2 };
   const StatusIcon = meta.icon;
+  const analysisDisplay = detail.analysisModel ?? detail.analysisProvider
+    ? `${detail.analysisModel ?? detail.configuredAnalysisModel} ${detail.analysisProvider === "qwen" ? "(Qwen3.8 via Modal)" : detail.analysisProvider === "kimi" ? "(Kimi K3 via Modal)" : detail.analysisProvider ? `(${detail.analysisProvider})` : ""}`.trim()
+    : detail.configuredAnalysisModel;
+  const showBadge = detail.showAnalysisModel;
 
   return (
     <div className="space-y-6">
-      <StoryHeader title={story.title} statusLabel={meta.label} StatusIcon={StatusIcon} />
+      <StoryHeader
+        title={story.title}
+        statusLabel={meta.label}
+        StatusIcon={StatusIcon}
+        analysisModel={analysisDisplay}
+        showAnalysisModel={showBadge}
+        fallbackModel={detail.fallbackAnalysisModel}
+      />
 
       {story.status === "created" || story.status === "analyzing" ? (
         <>
           <PipelineProgress detail={detail} />
           <StageNotice
             title="Analyzing the story"
-            description="Gemini is extracting characters and scenes. This usually takes under a minute."
+            description={
+              showBadge
+                ? `Model: ${analysisDisplay} — extracting characters and scenes. Usually under a minute.`
+                : "Gemini is extracting characters and scenes. This usually takes under a minute."
+            }
             pulse
           />
         </>
@@ -204,10 +227,16 @@ function StoryHeader({
   title,
   statusLabel,
   StatusIcon,
+  analysisModel,
+  showAnalysisModel,
+  fallbackModel,
 }: {
   title: string;
   statusLabel: string;
   StatusIcon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+  analysisModel: string;
+  showAnalysisModel: boolean;
+  fallbackModel: string;
 }) {
   return (
     <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
@@ -216,12 +245,24 @@ function StoryHeader({
         <h1 className="mt-1 font-display text-2xl font-bold tracking-tight text-fg text-balance sm:text-3xl">
           {title}
         </h1>
+        {showAnalysisModel && (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <span
+              className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
+              title={`Fallback: ${fallbackModel} if Qwen is unavailable`}
+            >
+              <Sparkles className="h-3 w-3" aria-hidden />
+              Analysis: {analysisModel}
+            </span>
+            <span className="text-xs text-fg-subtle">env toggle: NEXT_PUBLIC_SHOW_ANALYSIS_MODEL</span>
+          </div>
+        )}
     </div>
       <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-bg-elev px-3 py-1 text-xs font-medium text-fg-muted shadow-card">
         <StatusIcon className="h-3.5 w-3.5 text-primary" aria-hidden />
         {statusLabel}
-     </span>
-   </header>
+      </span>
+    </header>
   );
 }
 

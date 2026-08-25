@@ -9,9 +9,10 @@ import {
   Mic2,
   SkipForward,
   Sparkles,
+  Volume2,
 } from "lucide-react";
 import { NARRATOR_ID, type CharacterBible } from "@storyframe/schemas";
-import { narratorBible } from "@storyframe/pipeline";
+import { narratorBible, EDGE_VOICES, type EdgeVoiceId } from "@storyframe/pipeline";
 
 interface CastMember {
   characterId: string;
@@ -51,6 +52,7 @@ export function VoiceDirector({
   const [narrating, setNarrating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pickedVoices, setPickedVoices] = useState<Record<string, string>>({});
+  const [edgeMode, setEdgeMode] = useState(false); // Use Edge TTS instead of ElevenLabs
 
   const effectiveVoiceId = useCallback(
     (characterId: string, bibleVoiceId: string | null) => pickedVoices[characterId] ?? bibleVoiceId,
@@ -58,6 +60,26 @@ export function VoiceDirector({
   );
 
   const allCast = members.every((m) => effectiveVoiceId(m.characterId, m.bible.voice_id));
+
+  /** Pick an Edge TTS voice for a character and save it. */
+  async function pickEdgeVoice(characterId: string, edgeVoiceId: string) {
+    setSaving(characterId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/stories/${storyId}/voice/select`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ characterId, generatedVoiceId: `edge:${edgeVoiceId}` }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to save voice");
+      setPickedVoices((prev) => ({ ...prev, [characterId]: `edge:${edgeVoiceId}` }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save voice");
+    } finally {
+      setSaving(null);
+    }
+  }
 
   async function design(characterId: string) {
     setDesigning(characterId);
@@ -160,28 +182,37 @@ export function VoiceDirector({
     );
   }
 
-  if (!voiceEnabled) {
+  if (!voiceEnabled && !edgeMode) {
     return (
       <div className="space-y-4 rounded-xl border border-border bg-bg-elev p-5 shadow-card">
         <div className="flex items-start gap-3">
           <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-warning-bg text-warning-fg">
-            <AlertCircle className="h-5 w-5" aria-hidden />
+            <Volume2 className="h-5 w-5" aria-hidden />
       </span>
           <div>
-            <p className="font-display text-sm font-semibold text-fg">Voice narration is not configured</p>
+            <p className="font-display text-sm font-semibold text-fg">Voice narration options</p>
             <p className="mt-1 text-sm text-fg-muted">
-              No ElevenLabs API key is set, so voices can&apos;t be designed. You can skip narration
-              and move the story forward without audio.
-          </p>
+              No ElevenLabs API key is set. Use free Edge TTS voices (Microsoft neural voices — no API key needed),
+              or skip narration entirely.
+            </p>
         </div>
       </div>
-        <button
-          onClick={() => void setSkipped(true)}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-fg transition hover:bg-primary-hover"
-        >
-          <SkipForward className="h-4 w-4" aria-hidden />
-          Skip narration
-      </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setEdgeMode(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-fg transition hover:bg-primary-hover"
+          >
+            <Volume2 className="h-4 w-4" aria-hidden />
+            Use Edge TTS (free)
+          </button>
+          <button
+            onClick={() => void setSkipped(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-bg-elev px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface hover:text-fg"
+          >
+            <SkipForward className="h-4 w-4" aria-hidden />
+            Skip narration
+          </button>
+        </div>
         {error && (
           <div className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger-fg">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
@@ -192,6 +223,125 @@ export function VoiceDirector({
     );
   }
 
+  // Edge TTS voice selection mode
+  if (edgeMode) {
+    const edgeVoiceEntries = Object.entries(EDGE_VOICES) as [EdgeVoiceId, { name: string; lang: string; gender: "Male" | "Female" }][];
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-display text-base font-semibold text-fg">Edge TTS Voices</h3>
+            <p className="mt-1 text-sm text-fg-muted">
+              Free Microsoft neural voices — no API key needed. Select a voice for each character.
+            </p>
+          </div>
+          {voiceEnabled && (
+            <button
+              onClick={() => setEdgeMode(false)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-bg-elev px-3 py-1.5 text-sm font-medium text-fg-muted transition hover:bg-surface hover:text-fg"
+            >
+              <Sparkles className="h-3.5 w-3.5" aria-hidden />
+              Switch to ElevenLabs
+            </button>
+          )}
+        </div>
+
+        {members.map((member) => {
+          const voiceId = effectiveVoiceId(member.characterId, member.bible.voice_id);
+          const isEdge = voiceId?.startsWith("edge:");
+          const currentEdgeId = isEdge ? (voiceId!.slice(5) as EdgeVoiceId) : null;
+
+          return (
+            <div
+              key={member.characterId}
+              className="rounded-2xl border border-border bg-bg-elev p-5 shadow-card"
+            >
+              <div className="flex items-center gap-3">
+                <span
+                  className={`inline-flex h-9 w-9 items-center justify-center rounded-full ${
+                    voiceId ? "bg-success text-primary-fg" : "bg-primary/10 text-primary"
+                  }`}
+                >
+                  {voiceId ? <Check className="h-4 w-4" aria-hidden /> : <Mic2 className="h-4 w-4" aria-hidden />}
+                </span>
+                <div>
+                  <p className="font-display text-sm font-semibold text-fg">{member.name}</p>
+                  {currentEdgeId ? (
+                    <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-success-fg">
+                      <CheckCircle2 className="h-3 w-3" aria-hidden />
+                      {EDGE_VOICES[currentEdgeId].name} ({EDGE_VOICES[currentEdgeId].lang})
+                    </p>
+                  ) : voiceId ? (
+                    <p className="mt-0.5 text-xs text-fg-subtle">{voiceId.slice(0, 20)}…</p>
+                  ) : (
+                    <p className="mt-0.5 text-xs text-fg-subtle">No voice yet</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-3 grid grid-cols-2 gap-1.5 sm:grid-cols-3 md:grid-cols-4">
+                {edgeVoiceEntries.map(([id, info]) => (
+                  <button
+                    key={id}
+                    onClick={() => void pickEdgeVoice(member.characterId, id)}
+                    disabled={saving === member.characterId}
+                    className={`flex flex-col items-start rounded-lg border px-3 py-2 text-left text-xs transition ${
+                      currentEdgeId === id
+                        ? "border-success bg-success-bg text-success-fg"
+                        : "border-border bg-bg hover:bg-surface hover:text-fg"
+                    }`}
+                  >
+                    <span className="font-medium">{info.name}</span>
+                    <span className="text-fg-subtle">{info.lang} · {info.gender}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+
+        {error && (
+          <div className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger-fg">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+            <span>{error}</span>
+          </div>
+        )}
+
+        <button
+          onClick={() => void narrate()}
+          disabled={!allCast || narrating}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-primary-fg shadow-lift transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {narrating ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              Starting…
+            </>
+          ) : (
+            <>
+              <Mic2 className="h-4 w-4" aria-hidden />
+              Narrate with Edge TTS
+            </>
+          )}
+        </button>
+        {!allCast && (
+          <p className="text-xs text-fg-subtle">
+            Narrate unlocks once every character and the narrator have a voice.
+          </p>
+        )}
+        <button
+          onClick={() => void setSkipped(true)}
+          className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-bg-elev px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface hover:text-fg"
+        >
+          <SkipForward className="h-4 w-4" aria-hidden />
+          Skip narration for this story
+        </button>
+      </div>
+    );
+  }
+
+  // ElevenLabs mode (original UI)
   return (
     <div className="space-y-4">
       <div>
@@ -199,7 +349,7 @@ export function VoiceDirector({
         <p className="mt-1 text-sm text-fg-muted">
           Design a distinct voice for each character and the narrator. Previews are generated
           live — pick the one you like, or re-roll.
-      </p>
+        </p>
     </div>
 
       {members.map((member) => {

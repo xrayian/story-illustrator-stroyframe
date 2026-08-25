@@ -7,13 +7,17 @@ import type { Db } from "@storyframe/schemas/db";
 import { assets, characters, stories } from "@storyframe/schemas/db";
 import { storyAssetKey, type R2Client } from "@storyframe/storage";
 import { synthesizeWithTimestamps } from "./elevenlabs";
+import { synthesizeEdgeTts, selectEdgeVoiceForCharacter, type EdgeVoiceId } from "./edge-tts";
 import { assertCastApproved } from "./gate";
 import { ensureNarratorRow, speakersMissingVoices, TTS_MODEL } from "./voices";
 
 export interface NarrateOptions {
-  elevenLabsApiKey: string;
+  /** ElevenLabs API key (optional — falls back to Edge TTS when absent/402). */
+  elevenLabsApiKey?: string;
   /** Overrides TTS_MODEL (env ELEVENLABS_TTS_MODEL). */
   ttsModel?: string;
+  /** Edge TTS rate adjustment (default "+0%"). */
+  edgeRate?: string;
 }
 
 export interface NarrateResult {
@@ -27,6 +31,10 @@ export interface NarrateResult {
  * Phase 3: narrates every line of the story with its cast voice.
  * Idempotent per line (existing audio in R2 is skipped), so a failed run
  * resumes where it stopped. Story goes voice_generation -> ready, or failed.
+ *
+ * Voice chain: ElevenLabs → Edge TTS (free, unlimited). When elevenLabsApiKey
+ * is absent or ElevenLabs returns 402 (quota exhausted), automatically falls
+ * back to Edge TTS which requires no API key.
  */
 export async function narrateStory(
   db: Db,
@@ -85,11 +93,35 @@ export async function narrateStory(
           throw new Error(`No voice for speaker ${line.speaker_id}`);
         }
 
-        const result = await synthesizeWithTimestamps(opts.elevenLabsApiKey, {
-          voiceId,
-          text: line.text,
-          model,
-        });
+        // Try ElevenLabs first, fall back to Edge TTS
+        let result: { audio: Uint8Array; characters: string[]; startTimes: number[]; endTimes: number[] };
+        let provider = "elevenlabs";
+
+        try {
+          if (opts.elevenLabsApiKey) {
+            result = await synthesizeWithTimestamps(opts.elevenLabsApiKey, {
+              voiceId,
+              text: line.text,
+              model,
+            });
+          } else {
+            throw new Error("No ElevenLabs API key");
+          }
+        } catch (err) {
+          // If ElevenLabs fails (402 quota, 403 feature, no key), fall back to Edge TTS
+          const msg = err instanceof Error ? err.message : String(err);
+          const isQuotaError = msg.includes("402") || msg.includes("403") || msg.includes("quota") || msg.includes("No ElevenLabs API key");
+          if (!isQuotaError) throw err;
+
+          // Fall back to Edge TTS
+          const edgeVoiceId = selectEdgeVoiceForCharacter(
+            line.speaker_id,
+            speakerNameFromBible(voiceRows.find((r) => r.character_id === line.speaker_id)?.bible as CharacterBible | undefined),
+            voiceId
+          );
+          result = await synthesizeEdgeTts(edgeVoiceId, line.text, { rate: opts.edgeRate });
+          provider = "edge-tts";
+        }
 
         await r2.upload(audioKey, result.audio, "audio/mpeg");
         const timestamps = {
@@ -117,7 +149,8 @@ export async function narrateStory(
             lineId: line.id,
             speakerId: line.speaker_id,
             voiceId,
-            model,
+            provider,
+            model: provider === "edge-tts" ? "edge" : model,
           },
         });
         synthesized++;
@@ -137,4 +170,8 @@ export async function narrateStory(
   }
 
   return { scenes: manifest.scenes.length, lines, synthesized, skipped };
+}
+
+function speakerNameFromBible(bible: CharacterBible | undefined): string {
+  return bible?.name ?? "Unknown";
 }

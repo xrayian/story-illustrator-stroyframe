@@ -19,9 +19,19 @@ export async function analysisProcessor(job: Job): Promise<object> {
   const r2 = createR2(env);
 
   try {
+    const modalKey =
+      env.MODAL_PROXY_TOKEN_ID && env.MODAL_PROXY_TOKEN_SECRET
+        ? `${env.MODAL_PROXY_TOKEN_ID}.${env.MODAL_PROXY_TOKEN_SECRET}`
+        : undefined;
     const manifest = await analyzeStory(db, r2, storyId, {
       geminiApiKey: env.GEMINI_API_KEY,
       analysisModel: env.GEMINI_ANALYSIS_MODEL,
+      qwenApiKey: modalKey,
+      qwenBaseUrl: env.MODAL_QWEN_BASE_URL,
+      qwenModel: env.MODAL_QWEN_MODEL,
+      kimiApiKey: modalKey,
+      kimiBaseUrl: env.MODAL_KIMI_BASE_URL,
+      kimiModel: env.MODAL_KIMI_MODEL,
     });
     return {
       storyId,

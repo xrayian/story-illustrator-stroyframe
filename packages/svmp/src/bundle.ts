@@ -17,8 +17,8 @@ export interface BundleManifest {
   engine: {
     gemini_analysis_model?: string;
     gemini_image_model?: string;
-    voice_engine: "elevenlabs" | null;
-    image_engine: "gemini" | "huggingface" | "pollinations" | null;
+    voice_engine: "elevenlabs" | "edge-tts" | null;
+    image_engine: "pruna" | "gemini" | "huggingface" | "pollinations" | null;
   };
   counts: { characters: number; scenes: number; lines: number };
   duration_seconds: number;

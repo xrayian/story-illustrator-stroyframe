@@ -38,6 +38,10 @@ export const stories = pgTable("stories", {
   voice_skipped: boolean("voice_skipped").notNull().default(false),
   /** True when the user chose to skip the visual stage for this story. */
   visual_skipped: boolean("visual_skipped").notNull().default(false),
+  /** Analysis model that produced the story manifest (e.g. gemini-3.1-pro-preview or kimi-k3). */
+  analysis_model: text("analysis_model"),
+  /** Provider that succeeded for analysis: "gemini" | "kimi" | null. */
+  analysis_provider: text("analysis_provider"),
   created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

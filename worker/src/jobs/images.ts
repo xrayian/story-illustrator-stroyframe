@@ -2,7 +2,13 @@ import { eq } from "drizzle-orm";
 import { validateEnv } from "@storyframe/schemas/env";
 import { createDb, stories } from "@storyframe/schemas/db";
 import { createR2 } from "@storyframe/storage";
-import { generateStoryVisuals, HF_IMAGE_MODEL_DEFAULT, IMAGE_MODEL } from "@storyframe/pipeline";
+import {
+  generateStoryVisuals,
+  HF_IMAGE_MODEL_DEFAULT,
+  IMAGE_MODEL,
+  PRUNA_DEFAULT_BASE_URL,
+  PRUNA_DEFAULT_MODEL,
+} from "@storyframe/pipeline";
 import type { Job } from "bullmq";
 
 /**
@@ -25,6 +31,9 @@ export async function imageGenerationProcessor(job: Job): Promise<object> {
       hfToken: env.HF_TOKEN,
       hfModel: env.HF_IMAGE_MODEL ?? HF_IMAGE_MODEL_DEFAULT,
       pollinationsModel: env.POLLINATIONS_IMAGE_MODEL,
+      prunaApiKey: env.PRUNA_API_KEY,
+      prunaModel: env.PRUNA_IMAGE_MODEL ?? PRUNA_DEFAULT_MODEL,
+      prunaBaseUrl: env.PRUNA_API_BASE_URL ?? PRUNA_DEFAULT_BASE_URL,
     });
     return {
       storyId,

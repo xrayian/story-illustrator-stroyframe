@@ -44,6 +44,29 @@ export const envSchema = z.object({
    * routed to a serving provider automatically by @huggingface/inference.
    */
   HF_IMAGE_MODEL: z.string().min(1).optional(),
+  /** Modal proxy for Kimi K3 (OpenAI-compatible). Analysis fallback when Qwen is unavailable. */
+  MODAL_PROXY_TOKEN_ID: z.string().min(1).optional(),
+  MODAL_PROXY_TOKEN_SECRET: z.string().min(1).optional(),
+  /** Override for the Modal Kimi endpoint (default https://xrayian--ep-kimi-k3-server.us-west.modal.direct/v1). */
+  MODAL_KIMI_BASE_URL: z.string().min(1).optional(),
+  /** Model id at the Modal endpoint (default kimi-k3). */
+  MODAL_KIMI_MODEL: z.string().min(1).optional(),
+  /** Modal proxy for Qwen3.8-2.4T-A95B (OpenAI-compatible). PRIMARY story analyzer. */
+  MODAL_QWEN_BASE_URL: z
+    .string()
+    .min(1)
+    .optional(),
+  /** Model id at the Modal endpoint (default Qwen/Qwen3.8-2.4T-A95B). */
+  MODAL_QWEN_MODEL: z.string().min(1).optional(),
+  /** Show the analysis model badge in the UI. Set to "false" to hide. Default true. */
+  SHOW_ANALYSIS_MODEL: z.string().optional(),
+  NEXT_PUBLIC_SHOW_ANALYSIS_MODEL: z.string().optional(),
+  /** Pruna P-API image generation (primary). https://docs.api.pruna.ai */
+  PRUNA_API_KEY: z.string().min(1).optional(),
+  PRUNA_IMAGE_MODEL: z.string().min(1).optional(),
+  PRUNA_API_BASE_URL: z.string().min(1).optional(),
+  /** Edge TTS rate adjustment (e.g. "+0%", "+10%", "-5%"). Default "+0%". */
+  EDGE_TTS_RATE: z.string().min(1).optional(),
 });
 export type Env = z.infer<typeof envSchema>;
 

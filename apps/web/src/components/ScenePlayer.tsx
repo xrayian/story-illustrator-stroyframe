@@ -53,6 +53,8 @@ interface ScenePlayerProps {
 interface ActiveCue {
   speakerId: string;
   text: string;
+  start: number;
+  end: number;
 }
 
 const SPEEDS = [0.5, 1, 1.25, 1.5, 2] as const;
@@ -84,14 +86,30 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
   const rafRef = useRef<number | null>(null);
   const lastTickRef = useRef<number>(0);
   const ttsUtterRef = useRef<SpeechSynthesisUtterance | null>(null);
+  // TTS timing state: tracks which cue was last spoken and when TTS finished
+  const lastSpokenCueRef = useRef<string | null>(null);
+  const ttsFinishedAtRef = useRef<number>(0); // performance.now() when last TTS ended
+  const TTS_GAP_MS = 1000; // 1s gap between speeches
 
   const scene: ParsedScene | null = bundle.scenes[sceneIdx] ?? null;
   const totalDuration = bundle.totalDuration;
 
+  // Calculate which beat image to show based on scene progress
+  // 3 images per scene: start (0-33%), middle (33-66%), end (66-100%)
+  const currentBeatIdx = useMemo(() => {
+    if (!scene || scene.imageUrls.length <= 1) return 0;
+    const local = currentTime - scene.startOffset;
+    const progress = scene.duration > 0 ? Math.min(1, Math.max(0, local / scene.duration)) : 0;
+    if (progress < 0.33) return 0;      // start
+    if (progress < 0.66) return 1;      // middle
+    return 2;                           // end
+  }, [currentTime, scene]);
+
   const activeCue: ActiveCue | null = useMemo(() => {
     if (!scene || scene.cues.length === 0) return null;
     const local = currentTime - scene.startOffset;
-    return scene.cues.find((c) => local >= c.start && local < c.end) ?? null;
+    const c = scene.cues.find((c) => local >= c.start && local < c.end);
+    return c ? { speakerId: c.speakerId, text: c.text, start: c.start, end: c.end } : null;
   }, [currentTime, scene]);
 
   // Display cue sticks to the last spoken line during inter-cue gaps and
@@ -104,7 +122,7 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
     // In gap: keep previous cue visible until next cue starts.
     let prev: ActiveCue | null = null;
     for (const c of scene.cues) {
-      if (c.end <= local) prev = c;
+      if (c.end <= local) prev = { speakerId: c.speakerId, text: c.text, start: c.start, end: c.end };
       else if (c.start > local) break;
     }
     if (prev) return prev;
@@ -160,29 +178,74 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
+    // Mark TTS as finished now so the gap timer starts from this point
+    if (ttsUtterRef.current) {
+      ttsFinishedAtRef.current = performance.now();
+    }
     ttsUtterRef.current = null;
   }, []);
 
   // Speak the active cue via Web Speech when the bundle (or this scene) has
-  // no audio track. Cancel previous utterance on cue/playing/scene change.
+  // no audio track. Properly syncs with VTT timing:
+  //   1. Only speaks when we enter a NEW cue (not the same one)
+  //   2. Enforces a 1s gap after TTS finishes before the next cue can speak
+  //   3. Adjusts speech rate so the utterance fits within the cue's duration
   useEffect(() => {
     if (!ttsSupported || ttsMuted || !needsTts || !playing || !activeCue) {
       cancelTts();
       return;
     }
+
+    // Build a stable key for this cue (speaker + text)
+    const cueKey = `${activeCue.speakerId}::${activeCue.text}`;
+
+    // Don't re-speak the same cue
+    if (lastSpokenCueRef.current === cueKey) return;
+
+    // Enforce gap: if TTS just finished, wait at least TTS_GAP_MS
+    const now = performance.now();
+    const elapsed = now - ttsFinishedAtRef.current;
+    if (elapsed < TTS_GAP_MS && lastSpokenCueRef.current !== null) {
+      // Too soon — skip this cue and let the clock advance to the next one
+      return;
+    }
+
+    // Cancel any in-flight utterance
     cancelTts();
+
+    // Calculate how long this cue should take (VTT end - start)
+    const cueDuration = activeCue.end - activeCue.start;
+    // Estimate natural speech duration for this text (words / ~144 wpm)
+    const wordCount = activeCue.text.split(/\s+/).filter(Boolean).length;
+    const naturalDuration = wordCount / 2.4 + 0.35; // ~144 wpm + pause
+    // Scale rate so speech fits within the cue, clamped to [0.6, 2.0]
+    const targetRate = cueDuration > 0.1 ? Math.min(2.0, Math.max(0.6, naturalDuration / cueDuration * rate)) : rate;
+
     const utter = new SpeechSynthesisUtterance(activeCue.text);
-    utter.rate = rate;
+    utter.rate = targetRate;
     utter.pitch = pitchForSpeaker(activeCue.speakerId, speakerOrder);
     const voice = pickVoiceForSpeaker(activeCue.speakerId, ttsVoices, speakerOrder);
     if (voice) {
       utter.voice = voice;
       utter.lang = voice.lang;
     }
+
+    // Track when this utterance finishes
+    utter.onend = () => {
+      ttsFinishedAtRef.current = performance.now();
+      lastSpokenCueRef.current = cueKey;
+      ttsUtterRef.current = null;
+    };
+    utter.onerror = () => {
+      ttsFinishedAtRef.current = performance.now();
+      lastSpokenCueRef.current = cueKey;
+      ttsUtterRef.current = null;
+    };
+
     ttsUtterRef.current = utter;
     window.speechSynthesis.speak(utter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCue?.text, activeCue?.speakerId, playing, needsTts, ttsSupported, ttsMuted, speakerOrder, ttsVoices, rate, cancelTts]);
+  }, [activeCue?.text, activeCue?.speakerId, activeCue?.start, activeCue?.end, playing, needsTts, ttsSupported, ttsMuted, speakerOrder, ttsVoices, rate, cancelTts]);
 
   // Ensure TTS is cleaned up on unmount / scene navigation / pause.
   useEffect(() => {
@@ -190,19 +253,31 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
   }, [cancelTts]);
 
   useEffect(() => {
-    if (!playing) cancelTts();
+    if (!playing) {
+      cancelTts();
+      // Don't reset lastSpokenCueRef on pause — keep it so we don't re-speak
+      // the same cue when resuming. Only reset on scene change or seek.
+    }
   }, [playing, cancelTts]);
 
   useEffect(() => {
-    // Scene change cancels any in-flight utterance.
+    // Scene change cancels any in-flight utterance and resets TTS timing state.
     cancelTts();
+    lastSpokenCueRef.current = null;
+    ttsFinishedAtRef.current = 0;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sceneIdx]);
 
   // Voice-skipped driver: wall-clock rAF advances currentTime when no audio.
   // When browser TTS is speaking the current cue, we pause wall-clock so the
-  // utterance isn't cut off halfway by an early scene transition. Muted or
-  // non-TTS scenes advance on the fixed synthetic TTL.
+  // utterance isn't cut off halfway by an early scene transition.
+  //
+  // Timing flow:
+  //   1. Clock advances until cue.start → TTS effect fires and starts speaking
+  //   2. Clock pauses while TTS is speaking (speechSynthesis.speaking = true)
+  //   3. TTS finishes → ttsFinishedAtRef is set → clock resumes
+  //   4. Clock advances through the 1s gap → next cue starts
+  //   5. Repeat
   useEffect(() => {
     if (!playing || scene?.audioUrl) {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -211,17 +286,23 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
     }
     lastTickRef.current = performance.now();
     const tick = (now: number) => {
-      if (
+      const local = currentTime - scene.startOffset;
+      const currentCue = scene.cues.find((c) => local >= c.start && local < c.end);
+      const isSpeaking =
         needsTts &&
         !ttsMuted &&
         ttsSupported &&
         typeof window !== "undefined" &&
-        window.speechSynthesis.speaking
-      ) {
+        window.speechSynthesis.speaking;
+
+      // Pause wall-clock while TTS is actively speaking AND we're inside
+      // a cue's time window.
+      if (isSpeaking && currentCue) {
         lastTickRef.current = now;
         rafRef.current = requestAnimationFrame(tick);
         return;
       }
+
       const dt = (now - lastTickRef.current) / 1000;
       lastTickRef.current = now;
       setCurrentTime((t) => {
@@ -244,7 +325,7 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     };
-  }, [playing, scene, sceneIdx, bundle.scenes.length, bundle.scenes, totalDuration, rate, needsTts, ttsMuted, ttsSupported]);
+  }, [playing, scene, sceneIdx, bundle.scenes.length, bundle.scenes, totalDuration, rate, needsTts, ttsMuted, ttsSupported, currentTime]);
 
   // Voiced driver: <audio> element drives currentTime for the current scene.
   useEffect(() => {
@@ -261,8 +342,8 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
   const onAudioTimeUpdate = useCallback(() => {
     const audio = audioRef.current;
     if (!audio || !scene) return;
-    const local = audio.currentTime;
-    const global = scene.startOffset + local * (audio.playbackRate || 1);
+    // audio.currentTime is already in real seconds — no playbackRate scaling needed
+    const global = scene.startOffset + audio.currentTime;
     setCurrentTime(global);
     if (audio.ended) {
       const nextIdx = sceneIdx + 1;
@@ -283,7 +364,9 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
 
   const seek = useCallback(
     (globalTime: number) => {
-      if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
+      cancelTts();
+      lastSpokenCueRef.current = null;
+      ttsFinishedAtRef.current = 0;
       const target = bundle.scenes.findIndex(
         (s) => globalTime >= s.startOffset && globalTime < s.startOffset + s.duration
       );
@@ -298,22 +381,26 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
         if (playing) audio.play().catch(() => setPlaying(false));
       }
     },
-    [bundle.scenes, playing]
+    [bundle.scenes, playing, cancelTts]
   );
 
   const goPrev = useCallback(() => {
-    if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
+    cancelTts();
+    lastSpokenCueRef.current = null;
+    ttsFinishedAtRef.current = 0;
     setSceneIdx((i) => Math.max(0, i - 1));
     const s = bundle.scenes[Math.max(0, sceneIdx - 1)];
     setCurrentTime(s?.startOffset ?? 0);
-  }, [bundle.scenes, sceneIdx]);
+  }, [bundle.scenes, sceneIdx, cancelTts]);
 
   const goNext = useCallback(() => {
-    if (typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
+    cancelTts();
+    lastSpokenCueRef.current = null;
+    ttsFinishedAtRef.current = 0;
     const nextIdx = Math.min(bundle.scenes.length - 1, sceneIdx + 1);
     setSceneIdx(nextIdx);
     setCurrentTime(bundle.scenes[nextIdx]?.startOffset ?? 0);
-  }, [bundle.scenes, sceneIdx]);
+  }, [bundle.scenes, sceneIdx, cancelTts]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -345,13 +432,13 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
 
   return (
     <div className="space-y-4">
-      {/* Stage — scene image only; caption is a separate bar below to avoid overlap. */}
+      {/* Stage — scene image(s) with beat-synced carousel; caption bar below. */}
       <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-border bg-black shadow-lift">
-        {scene.imageUrl ? (
+        {scene.imageUrls.length > 0 ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={scene.imageUrl}
-            alt={`Scene ${scene.manifest.id}`}
+            src={scene.imageUrls[currentBeatIdx] ?? scene.imageUrls[0]}
+            alt={`Scene ${scene.manifest.id} — ${currentBeatIdx === 0 ? "start" : currentBeatIdx === 1 ? "middle" : "end"}`}
             className="h-full w-full object-cover"
             style={{
               transform: `scale(${1 + sceneProgress * 0.08}) translate(${sceneProgress * -2}%, ${sceneProgress * -1}%)`,
@@ -362,7 +449,23 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
           <div className="flex h-full flex-col items-center justify-center gap-2 text-fg-subtle">
             <ImageOff className="h-8 w-8" aria-hidden />
             <p className="text-sm">No illustration</p>
-      </div>
+          </div>
+        )}
+
+        {/* Beat indicator dots — show which of the 3 images is active */}
+        {scene.imageUrls.length > 1 && (
+          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 rounded-full bg-black/60 px-2.5 py-1 backdrop-blur-sm">
+            {scene.imageUrls.map((_, i) => (
+              <div
+                key={i}
+                className={`h-1.5 rounded-full transition-all ${
+                  i === currentBeatIdx
+                    ? "w-4 bg-white"
+                    : "w-1.5 bg-white/40"
+                }`}
+              />
+            ))}
+          </div>
         )}
 
         <div className="absolute left-3 top-3 rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white backdrop-blur-sm">

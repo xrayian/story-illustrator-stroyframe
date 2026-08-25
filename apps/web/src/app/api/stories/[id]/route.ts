@@ -21,6 +21,8 @@ export async function GET(
       source_url: stories.source_url,
       voice_skipped: stories.voice_skipped,
       visual_skipped: stories.visual_skipped,
+      analysis_model: stories.analysis_model,
+      analysis_provider: stories.analysis_provider,
       created_at: stories.created_at,
     })
     .from(stories)
@@ -64,9 +66,20 @@ export async function GET(
     manifest = null;
   }
 
+  const env = getEnv();
+  const showRaw = env.NEXT_PUBLIC_SHOW_ANALYSIS_MODEL ?? env.SHOW_ANALYSIS_MODEL;
+  const showAnalysisModel = showRaw === undefined ? true : showRaw.toLowerCase() !== "false" && showRaw !== "0";
+  const primaryModel = env.MODAL_QWEN_MODEL ?? "Qwen/Qwen3.8-2.4T-A95B";
+  const fallbackModel = env.GEMINI_ANALYSIS_MODEL ?? "gemini-3.1-pro-preview";
+
   return NextResponse.json({
     story,
-    voice_enabled: Boolean(getEnv().ELEVENLABS_API_KEY),
+    voice_enabled: Boolean(env.ELEVENLABS_API_KEY),
+    showAnalysisModel,
+    configuredAnalysisModel: primaryModel,
+    fallbackAnalysisModel: fallbackModel,
+    analysisModel: story.analysis_model ?? null,
+    analysisProvider: story.analysis_provider ?? null,
     characters: characterRows.map((row) => ({
       characterId: row.character_id,
       name: row.name,

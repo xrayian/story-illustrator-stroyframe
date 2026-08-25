@@ -9,7 +9,7 @@ redistributable media bundle (.svmp).
 - Postgres via Drizzle ORM (Neon)
 - Object storage: Cloudflare R2 (S3-compatible)
 - Job queue: BullMQ + Upstash Redis
-- External APIs: Gemini (analysis + image generation), ElevenLabs (Voice Design v3, TTS)
+- External APIs: Gemini (analysis + image generation), ElevenLabs (Voice Design v3, TTS), Pruna P-API (image generation), Edge TTS (free voice synthesis)
 - Schemas: Zod v4 (shared across web + worker)
 
 ## Conventions
@@ -28,7 +28,15 @@ redistributable media bundle (.svmp).
   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, GEMINI_API_KEY, ELEVENLABS_API_KEY.
   Optional: GEMINI_ANALYSIS_MODEL (default gemini-3.1-pro-preview),
   HF_TOKEN + HF_IMAGE_MODEL (Hugging Face image fallback, default
-  black-forest-labs/flux.1-schnell), POLLINATIONS_IMAGE_MODEL (default flux).
+  black-forest-labs/flux.1-schnell), POLLINATIONS_IMAGE_MODEL (default flux),
+  MODAL_PROXY_TOKEN_ID + MODAL_PROXY_TOKEN_SECRET + MODAL_QWEN_BASE_URL
+  (default https://xrayian--ep-qwen3-8-2-4t-a95b-server.us-west.modal.direct/v1) +
+  MODAL_QWEN_MODEL (default Qwen/Qwen3.8-2.4T-A95B) for Qwen3.8 analysis (PRIMARY).
+  MODAL_KIMI_BASE_URL (default https://xrayian--ep-kimi-k3-server.us-west.modal.direct/v1) +
+  MODAL_KIMI_MODEL (default kimi-k3) for Kimi K3 analysis fallback when Qwen is unavailable.
+  PRUNA_API_KEY + PRUNA_IMAGE_MODEL (default p-image) + PRUNA_API_BASE_URL
+  (default https://api.pruna.ai) for Pruna P-API image generation (primary).
+  EDGE_TTS_RATE (default "+0%") for Edge TTS voice rate adjustment.
 
 ## Budget
 

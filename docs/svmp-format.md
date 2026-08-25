@@ -26,7 +26,9 @@ mystory.svmp
 │   ├── characters/
 │   │   └── char_1.jpg          # canonical reference portrait (mime chooses extension)
 │   └── scene_001/
-│       └── illustration.jpg    # scene illustration
+│       ├── illustration_0.jpg    # scene illustration (3 beats: start/middle/end)
+│       ├── illustration_1.jpg
+│       └── illustration_2.jpg
 ├── captions/                   # always present — synthetic when voice_skipped (see below)
 │   └── scene_001.vtt
 └── checksums.json              # { "path": "sha256-hex", ... } for every other entry
@@ -41,8 +43,8 @@ mystory.svmp
   "engine": {
     "gemini_analysis_model": "gemini-3.5-flash",
     "gemini_image_model": "nano-banana-pro-preview",
-    "voice_engine": "elevenlabs",
-    "image_engine": "pollinations"          // "gemini" | "pollinations" | null (visual_skipped)
+    "voice_engine": "elevenlabs",           // "elevenlabs" | "edge-tts" | null (voice_skipped)
+    "image_engine": "pruna"                 // "pruna" | "gemini" | "huggingface" | "pollinations" | null (visual_skipped)
   },
   "counts": { "characters": 2, "scenes": 2, "lines": 7 },
   "duration_seconds": 18.4,                  // sum of audio (or synthetic) durations; ~estimated when voice_skipped
@@ -102,7 +104,7 @@ When `voice_skipped` is true there are no audio timestamps in R2 — the
 assembler synthesizes captions from the script (`StoryManifest.scenes[].lines`)
 instead, using `syntheticSceneToVtt` (`svmp/captions.ts`) with durations
 estimated from text length (`estimateLineDuration`). One cue per line, with a
-0.2 s inter-line gap. The resulting bundle has a non-zero
+1.0 s inter-line gap. The resulting bundle has a non-zero
 `manifest.duration_seconds` (used by the wall-clock driver) and the browser
 player's Web Speech fallback (`window.speechSynthesis`) speaks each cue aloud,
 picking a distinct `SpeechSynthesisVoice` per speaker by hash + per-character

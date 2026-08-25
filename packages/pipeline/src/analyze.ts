@@ -13,6 +13,16 @@ import { storyAssetKey, type R2Client } from "@storyframe/storage";
 import { sanitizeStory } from "./sanitize";
 import { needsChunking, splitByChapterMarkers } from "./chunk";
 import { generateStructuredJson } from "./gemini";
+import {
+  generateStructuredJsonWithKimi,
+  KIMI_DEFAULT_BASE_URL,
+  KIMI_DEFAULT_MODEL,
+} from "./kimi";
+import {
+  generateStructuredJsonWithQwen,
+  QWEN_DEFAULT_BASE_URL,
+  QWEN_DEFAULT_MODEL,
+} from "./qwen";
 import { ANALYSIS_MODEL, ANALYSIS_SYSTEM_INSTRUCTION } from "./prompts";
 import { deriveBible } from "./bible";
 
@@ -20,10 +30,18 @@ export interface AnalyzeOptions {
   geminiApiKey: string;
   /** Overrides ANALYSIS_MODEL (env GEMINI_ANALYSIS_MODEL). */
   analysisModel?: string;
+  /** Qwen via Modal proxy (primary analyzer). */
+  qwenBaseUrl?: string;
+  qwenApiKey?: string;
+  qwenModel?: string;
+  /** Kimi K3 via Modal proxy (secondary fallback). */
+  kimiBaseUrl?: string;
+  kimiApiKey?: string;
+  kimiModel?: string;
 }
 
 /**
- * Phase 1: sanitize -> (chunk if needed) -> Gemini analysis -> validate ->
+ * Phase 1: sanitize -> (chunk if needed) -> structured analysis -> validate ->
  * persist (stories/characters/scenes rows + manifest.json in R2).
  * Throws on failure; callers flip the story to analysis_failed.
  */
@@ -56,21 +74,99 @@ export async function analyzeStory(
           .join("\n\n")
       : sanitized.text;
 
-const raw = await generateStructuredJson(
-    {
-      apiKey: opts.geminiApiKey,
-      model: opts.analysisModel ?? ANALYSIS_MODEL,
-      systemInstruction: ANALYSIS_SYSTEM_INSTRUCTION,
-      jsonSchema: storyManifestJsonSchema,
-    },
-    input
-  );
+  // Provider chain (first configured entry wins): Qwen via Modal -> Kimi via
+  // Modal -> Gemini. Modal auth is "ID.SECRET" from the proxy token pair.
+  const modalKey =
+    process.env.MODAL_PROXY_TOKEN_ID && process.env.MODAL_PROXY_TOKEN_SECRET
+      ? `${process.env.MODAL_PROXY_TOKEN_ID}.${process.env.MODAL_PROXY_TOKEN_SECRET}`
+      : undefined;
+
+  type Attempt = { provider: string; model: string; run: () => Promise<unknown> };
+  const attempts: Attempt[] = [];
+
+  if (opts.qwenApiKey ?? modalKey) {
+    const model = opts.qwenModel ?? process.env.MODAL_QWEN_MODEL ?? QWEN_DEFAULT_MODEL;
+    attempts.push({
+      provider: "qwen",
+      model,
+      run: () =>
+        generateStructuredJsonWithQwen(
+          {
+            baseUrl: opts.qwenBaseUrl ?? process.env.MODAL_QWEN_BASE_URL ?? QWEN_DEFAULT_BASE_URL,
+            apiKey: opts.qwenApiKey ?? modalKey!,
+            model,
+            systemInstruction: ANALYSIS_SYSTEM_INSTRUCTION,
+            jsonSchema: storyManifestJsonSchema,
+          },
+          input
+        ),
+    });
+  }
+  if (opts.kimiApiKey ?? modalKey) {
+    const model = opts.kimiModel ?? process.env.MODAL_KIMI_MODEL ?? KIMI_DEFAULT_MODEL;
+    attempts.push({
+      provider: "kimi",
+      model,
+      run: () =>
+        generateStructuredJsonWithKimi(
+          {
+            baseUrl: opts.kimiBaseUrl ?? process.env.MODAL_KIMI_BASE_URL ?? KIMI_DEFAULT_BASE_URL,
+            apiKey: opts.kimiApiKey ?? modalKey!,
+            model,
+            systemInstruction: ANALYSIS_SYSTEM_INSTRUCTION,
+            jsonSchema: storyManifestJsonSchema,
+          },
+          input
+        ),
+    });
+  }
+  {
+    const model = opts.analysisModel ?? ANALYSIS_MODEL;
+    attempts.push({
+      provider: "gemini",
+      model,
+      run: () =>
+        generateStructuredJson(
+          {
+            apiKey: opts.geminiApiKey,
+            model,
+            systemInstruction: ANALYSIS_SYSTEM_INSTRUCTION,
+            jsonSchema: storyManifestJsonSchema,
+          },
+          input
+        ),
+    });
+  }
+
+  let raw: unknown;
+  let analysisProvider: string | null = null;
+  let analysisModel = "";
+  const failures: string[] = [];
+  for (const attempt of attempts) {
+    try {
+      raw = await attempt.run();
+      analysisProvider = attempt.provider;
+      analysisModel = attempt.model;
+      break;
+    } catch (err) {
+      failures.push(`${attempt.provider}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  if (analysisProvider === null) {
+    throw new Error(`All analysis providers failed — ${failures.join(" | ")}`);
+  }
 
   const manifest = storyManifestSchema.parse(raw);
 
   await db
     .update(stories)
-    .set({ sanitized_text: sanitized.text, status: "cast_review", updated_at: new Date() })
+    .set({
+      sanitized_text: sanitized.text,
+      status: "cast_review",
+      analysis_model: analysisModel,
+      analysis_provider: analysisProvider,
+      updated_at: new Date(),
+    })
     .where(eq(stories.id, storyId));
 
   for (const character of manifest.characters) {

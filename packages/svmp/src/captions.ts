@@ -133,7 +133,7 @@ function pad3(n: number): string {
 /** Approx. speech rate used to estimate cue durations when no audio exists. */
 const SYNTH_WORDS_PER_SECOND = 2.4; // ~144 wpm
 const SYNTH_CHARS_PER_SECOND = 14;
-const SYNTH_GAP_SECONDS = 0.2;
+const SYNTH_GAP_SECONDS = 1.0; // 1s gap between speeches for natural pacing
 const SYNTH_MIN_LINE_SECONDS = 0.9;
 const SYNTH_MAX_LINE_SECONDS = 12;
 

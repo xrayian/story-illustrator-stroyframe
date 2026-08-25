@@ -43,22 +43,30 @@ export async function POST(
   const { characterId, generatedVoiceId } = parsed.data;
 
   try {
-    if (!env.ELEVENLABS_API_KEY) {
-      return NextResponse.json(
-        { error: "ElevenLabs is not configured — no API key" },
-        { status: 503 }
-      );
-    }
     if (characterId === NARRATOR_ID) {
       await ensureNarratorRow(db, id);
     }
 
     const bible = await loadCharacterBible(db, id, characterId);
-    const voiceId = await createVoiceFromPreview(env.ELEVENLABS_API_KEY, {
-      voiceName: bible.name,
-      voiceDescription: buildVoiceDescription(bible),
-      generatedVoiceId,
-    });
+    let voiceId: string;
+
+    if (generatedVoiceId.startsWith("edge:")) {
+      // Edge TTS: store voice ID directly, no ElevenLabs API call needed
+      voiceId = generatedVoiceId;
+    } else {
+      // ElevenLabs: create voice from preview and get permanent voice ID
+      if (!env.ELEVENLABS_API_KEY) {
+        return NextResponse.json(
+          { error: "ElevenLabs is not configured — no API key" },
+          { status: 503 }
+        );
+      }
+      voiceId = await createVoiceFromPreview(env.ELEVENLABS_API_KEY, {
+        voiceName: bible.name,
+        voiceDescription: buildVoiceDescription(bible),
+        generatedVoiceId,
+      });
+    }
 
     await db
       .update(characters)

@@ -79,9 +79,11 @@ export async function assembleBundle(
     .where(eq(assets.story_id, storyId));
   const prefix = R2_PREFIX(storyId);
   const pathToKey = new Map();
+  const assetMetaByPath = new Map<string, Record<string, unknown>>();
   for (const row of assetRows) {
     if (!row.r2_key.startsWith(prefix)) continue;
     pathToKey.set(row.r2_key.slice(prefix.length), row.r2_key);
+    if (row.meta) assetMetaByPath.set(row.r2_key.slice(prefix.length), row.meta as Record<string, unknown>);
   }
 
   // Re-anchor image URLs in characters + scenes to bundle-relative paths so
@@ -92,12 +94,20 @@ export async function assembleBundle(
       ? rel(pathToKey, c.reference_image_url)
       : null,
   }));
-  const bundleScenes: SceneManifest[] = sceneManifests.map((s) => ({
-    ...s,
-    image: s.image
-      ? { key: s.image.key, url: rel(pathToKey, s.image.url) }
-      : null,
-  }));
+  const bundleScenes: SceneManifest[] = sceneManifests.map((s) => {
+    const base: SceneManifest = {
+      ...s,
+      image: s.image ? { key: s.image.key, url: rel(pathToKey, s.image.url) } : null,
+    } as SceneManifest;
+    const anyS = s as unknown as { images?: { key: string; url: string }[] };
+    if (anyS.images && Array.isArray(anyS.images) && anyS.images.length > 0) {
+      (base as unknown as { images: { key: string; url: string }[] }).images = anyS.images.map((img) => ({
+        key: img.key,
+        url: rel(pathToKey, img.url),
+      }));
+    }
+    return base;
+  });
 
   // Captions: load each scene's per-line timestamps and build VTT with a
   // cumulative offset across scenes (continuous bundle timeline). When voice
@@ -164,14 +174,34 @@ export async function assembleBundle(
     },
   };
 
+  // Determine actual providers used by reading assets.meta
+  let voiceEngine: "elevenlabs" | "edge-tts" | null = null;
+  let imageEngine: "pruna" | "gemini" | "huggingface" | "pollinations" | null = null;
+  if (!story[0].voice_skipped) {
+    for (const [path, meta] of assetMetaByPath) {
+      if (path.startsWith("audio/") && meta.purpose === "narration" && typeof meta.provider === "string") {
+        voiceEngine = meta.provider as "elevenlabs" | "edge-tts";
+        break;
+      }
+    }
+  }
+  if (!story[0].visual_skipped) {
+    for (const [path, meta] of assetMetaByPath) {
+      if (path.startsWith("images/") && meta.purpose === "illustration" && typeof meta.provider === "string") {
+        imageEngine = meta.provider as "pruna" | "gemini" | "huggingface" | "pollinations";
+        break;
+      }
+    }
+  }
+
   const manifest: BundleManifest = {
     format_version: FORMAT_VERSION,
     title: story[0].title,
     engine: {
       gemini_analysis_model: opts.geminiAnalysisModel,
       gemini_image_model: opts.geminiImageModel,
-      voice_engine: story[0].voice_skipped ? null : "elevenlabs",
-      image_engine: story[0].visual_skipped ? null : "pollinations",
+      voice_engine: voiceEngine,
+      image_engine: imageEngine,
     },
     counts: {
       characters: characterBibles.length,

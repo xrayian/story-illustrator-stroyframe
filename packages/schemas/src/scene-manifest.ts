@@ -12,13 +12,22 @@ export const sceneManifestSchema = z.object({
   mood: z.string(),
   is_key_scene: z.boolean(),
   characters_present: z.array(z.string()),
-  /** Illustrated image asset (set during the Phase 4 visual step). */
+  /** Illustrated image asset (set during the Phase 4 visual step). Legacy single — keep for back-compat. */
   image: z
     .object({
       key: z.string().min(1),
       url: z.string().min(1),
     })
     .nullable(),
+  /** When 3× per-scene is used, all beat images. First entry mirrors `image` for old players. */
+  images: z
+    .array(
+      z.object({
+        key: z.string().min(1),
+        url: z.string().min(1),
+      })
+    )
+    .optional(),
   /** StoryLine ids belonging to this scene, in order. */
   line_refs: z.array(z.string()),
 });
