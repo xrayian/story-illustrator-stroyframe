@@ -7,7 +7,7 @@ import type { Db } from "@storyframe/schemas/db";
 import { assets, characters, stories } from "@storyframe/schemas/db";
 import { storyAssetKey, type R2Client } from "@storyframe/storage";
 import { synthesizeWithTimestamps } from "./elevenlabs";
-import { synthesizeEdgeTts, selectEdgeVoiceForCharacter, type EdgeVoiceId } from "./edge-tts";
+import { synthesizeEdgeTts, selectEdgeVoiceForCharacter, parseEdgeVoiceId } from "./edge-tts";
 import { assertCastApproved } from "./gate";
 import { ensureNarratorRow, speakersMissingVoices, TTS_MODEL } from "./voices";
 
@@ -63,7 +63,7 @@ export async function narrateStory(
 
   await db
     .update(stories)
-    .set({ status: "voice_generation", updated_at: new Date() })
+    .set({ status: "voice_generation", failed_stage: null, updated_at: new Date() })
     .where(eq(stories.id, storyId));
 
   const model = opts.ttsModel ?? TTS_MODEL;
@@ -93,31 +93,46 @@ export async function narrateStory(
           throw new Error(`No voice for speaker ${line.speaker_id}`);
         }
 
-        // Try ElevenLabs first, fall back to Edge TTS
         let result: { audio: Uint8Array; characters: string[]; startTimes: number[]; endTimes: number[] };
-        let provider = "elevenlabs";
+        let provider: string;
+        const isEdgeVoice = voiceId.startsWith("edge:");
 
-        try {
-          if (opts.elevenLabsApiKey) {
+        if (isEdgeVoice) {
+          // Voice was explicitly cast as Edge TTS — synthesize directly, skip ElevenLabs
+          const edgeVoiceId = parseEdgeVoiceId(voiceId);
+          result = await synthesizeEdgeTts(edgeVoiceId, line.text, { rate: opts.edgeRate });
+          provider = "edge-tts";
+        } else if (opts.elevenLabsApiKey) {
+          // Try ElevenLabs, fall back to Edge TTS on any failure
+          try {
             result = await synthesizeWithTimestamps(opts.elevenLabsApiKey, {
               voiceId,
               text: line.text,
               model,
             });
-          } else {
-            throw new Error("No ElevenLabs API key");
+            provider = "elevenlabs";
+          } catch (err) {
+            console.warn(
+              `[narrate] ElevenLabs failed for line ${line.id} (${err instanceof Error ? err.message : err}), falling back to Edge TTS`
+            );
+            const speakerBible = voiceRows.find((r) => r.character_id === line.speaker_id)?.bible as CharacterBible | undefined;
+            const edgeVoiceId = selectEdgeVoiceForCharacter(
+              line.speaker_id,
+              speakerNameFromBible(speakerBible),
+              null,
+              speakerBible
+            );
+            result = await synthesizeEdgeTts(edgeVoiceId, line.text, { rate: opts.edgeRate });
+            provider = "edge-tts";
           }
-        } catch (err) {
-          // If ElevenLabs fails (402 quota, 403 feature, no key), fall back to Edge TTS
-          const msg = err instanceof Error ? err.message : String(err);
-          const isQuotaError = msg.includes("402") || msg.includes("403") || msg.includes("quota") || msg.includes("No ElevenLabs API key");
-          if (!isQuotaError) throw err;
-
-          // Fall back to Edge TTS
+        } else {
+          // No ElevenLabs key — use Edge TTS with gender-aware voice selection
+          const speakerBible = voiceRows.find((r) => r.character_id === line.speaker_id)?.bible as CharacterBible | undefined;
           const edgeVoiceId = selectEdgeVoiceForCharacter(
             line.speaker_id,
-            speakerNameFromBible(voiceRows.find((r) => r.character_id === line.speaker_id)?.bible as CharacterBible | undefined),
-            voiceId
+            speakerNameFromBible(speakerBible),
+            null,
+            speakerBible
           );
           result = await synthesizeEdgeTts(edgeVoiceId, line.text, { rate: opts.edgeRate });
           provider = "edge-tts";
@@ -164,7 +179,7 @@ export async function narrateStory(
   } catch (err) {
     await db
       .update(stories)
-      .set({ status: "failed", updated_at: new Date() })
+      .set({ status: "failed", failed_stage: "voice", updated_at: new Date() })
       .where(eq(stories.id, storyId));
     throw err;
   }

@@ -9,6 +9,7 @@ import {
 } from "@storyframe/schemas";
 import type { Db } from "@storyframe/schemas/db";
 import { characters, scenes, stories } from "@storyframe/schemas/db";
+import { and } from "drizzle-orm";
 import { storyAssetKey, type R2Client } from "@storyframe/storage";
 import { sanitizeStory } from "./sanitize";
 import { needsChunking, splitByChapterMarkers } from "./chunk";
@@ -62,6 +63,10 @@ export async function analyzeStory(
     .set({ status: "analyzing", updated_at: new Date() })
     .where(eq(stories.id, storyId));
 
+  // Clear old characters and scenes for re-analysis
+  await db.delete(characters).where(eq(characters.story_id, storyId));
+  await db.delete(scenes).where(eq(scenes.story_id, storyId));
+
   const sanitized = sanitizeStory(story.source_text);
   if (sanitized.wordCount === 0) {
     throw new Error("Story text is empty after sanitization");
@@ -74,8 +79,8 @@ export async function analyzeStory(
           .join("\n\n")
       : sanitized.text;
 
-  // Provider chain (first configured entry wins): Qwen via Modal -> Kimi via
-  // Modal -> Gemini. Modal auth is "ID.SECRET" from the proxy token pair.
+  // Provider chain (first configured entry wins): Gemini (primary) ->
+  // Qwen via Modal -> Kimi via Modal. Modal auth is "ID.SECRET" from the proxy token pair.
   const modalKey =
     process.env.MODAL_PROXY_TOKEN_ID && process.env.MODAL_PROXY_TOKEN_SECRET
       ? `${process.env.MODAL_PROXY_TOKEN_ID}.${process.env.MODAL_PROXY_TOKEN_SECRET}`
@@ -84,6 +89,23 @@ export async function analyzeStory(
   type Attempt = { provider: string; model: string; run: () => Promise<unknown> };
   const attempts: Attempt[] = [];
 
+  if (opts.geminiApiKey) {
+    const model = opts.analysisModel ?? ANALYSIS_MODEL;
+    attempts.push({
+      provider: "gemini",
+      model,
+      run: () =>
+        generateStructuredJson(
+          {
+            apiKey: opts.geminiApiKey,
+            model,
+            systemInstruction: ANALYSIS_SYSTEM_INSTRUCTION,
+            jsonSchema: storyManifestJsonSchema,
+          },
+          input
+        ),
+    });
+  }
   if (opts.qwenApiKey ?? modalKey) {
     const model = opts.qwenModel ?? process.env.MODAL_QWEN_MODEL ?? QWEN_DEFAULT_MODEL;
     attempts.push({
@@ -112,23 +134,6 @@ export async function analyzeStory(
           {
             baseUrl: opts.kimiBaseUrl ?? process.env.MODAL_KIMI_BASE_URL ?? KIMI_DEFAULT_BASE_URL,
             apiKey: opts.kimiApiKey ?? modalKey!,
-            model,
-            systemInstruction: ANALYSIS_SYSTEM_INSTRUCTION,
-            jsonSchema: storyManifestJsonSchema,
-          },
-          input
-        ),
-    });
-  }
-  {
-    const model = opts.analysisModel ?? ANALYSIS_MODEL;
-    attempts.push({
-      provider: "gemini",
-      model,
-      run: () =>
-        generateStructuredJson(
-          {
-            apiKey: opts.geminiApiKey,
             model,
             systemInstruction: ANALYSIS_SYSTEM_INSTRUCTION,
             jsonSchema: storyManifestJsonSchema,

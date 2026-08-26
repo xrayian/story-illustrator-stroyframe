@@ -10,8 +10,28 @@ import {
 const sampleManifest: StoryManifest = {
   title: "The Lighthouse Keeper",
   characters: [
-    { id: "char_1", name: "Elena", aliases: ["El"], role: "protagonist" },
-    { id: "char_2", name: "Marta", aliases: [], role: "supporting" },
+    {
+      id: "char_1",
+      name: "Elena",
+      aliases: ["El"],
+      role: "protagonist",
+      apparent_age_range: "",
+      gender_expression: "",
+      ethnicity_or_culture_cues: "",
+      physical_description: "",
+      personality_traits: [],
+    },
+    {
+      id: "char_2",
+      name: "Marta",
+      aliases: [],
+      role: "supporting",
+      apparent_age_range: "",
+      gender_expression: "",
+      ethnicity_or_culture_cues: "",
+      physical_description: "",
+      personality_traits: [],
+    },
   ],
   scenes: [
     {

@@ -126,9 +126,16 @@ export async function parseBundle(zip: Uint8Array): Promise<ParsedBundle> {
     const rawCues = await readCues(`captions/${scene.id}.vtt`, await text(`captions/${scene.id}.vtt`));
     // Normalize cue times from bundle-global to scene-local so the player's
     // `local = currentTime - startOffset` lookup works for every scene.
-    // Older bundles already encode the offset in the VTT; this makes both
-    // old and new bundles render correctly beyond scene 0.
-    const cues = rawCues.length > 0 ? rawCues.map((c) => ({ ...c, start: c.start - offset, end: c.end - offset })) : [];
+    const isGlobal = offset > 1.0 && rawCues.length > 0 && rawCues[0].start >= offset - 2.0;
+    const cues = rawCues.map((c) => {
+      const s = isGlobal ? c.start - offset : c.start;
+      const e = isGlobal ? c.end - offset : c.end;
+      return {
+        ...c,
+        start: Math.max(0, s),
+        end: Math.max(s + 0.05, e),
+      };
+    });
     // When there's no audio but cues exist (voice-skipped synthetic path),
     // derive the scene duration from the cue span rather than the 6s fallback.
     if (!audioUrl && cues.length > 0) {

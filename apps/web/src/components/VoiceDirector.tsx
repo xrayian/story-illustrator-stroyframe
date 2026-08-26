@@ -39,10 +39,14 @@ export function VoiceDirector({
   voiceSkipped: boolean;
 }) {
   const members = useMemo<CastMember[]>(
-    () => [
-      ...characters,
-      { characterId: NARRATOR_ID, name: "Narrator", bible: narratorBible() },
-    ],
+    () => {
+      const hasNarrator = characters.some(c => c.characterId === NARRATOR_ID);
+      if (hasNarrator) return characters;
+      return [
+        ...characters,
+        { characterId: NARRATOR_ID, name: "Narrator", bible: narratorBible() },
+      ];
+    },
     [characters]
   );
 
@@ -52,7 +56,7 @@ export function VoiceDirector({
   const [narrating, setNarrating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pickedVoices, setPickedVoices] = useState<Record<string, string>>({});
-  const [edgeMode, setEdgeMode] = useState(false); // Use Edge TTS instead of ElevenLabs
+  const [edgeMode, setEdgeMode] = useState(!voiceEnabled); // Auto-enable Edge TTS if ElevenLabs unavailable
 
   const effectiveVoiceId = useCallback(
     (characterId: string, bibleVoiceId: string | null) => pickedVoices[characterId] ?? bibleVoiceId,
@@ -147,6 +151,42 @@ export function VoiceDirector({
       if (!res.ok) throw new Error(data.error ?? "Failed to update narration");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update narration");
+    }
+  }
+
+  const [autoAssigning, setAutoAssigning] = useState(false);
+
+  async function narrateWithEdgeTts() {
+    setAutoAssigning(true);
+    setError(null);
+    try {
+      // Auto-assign Edge TTS voices to all members who don't have one yet
+      for (const member of members) {
+        const currentVoice = effectiveVoiceId(member.characterId, member.bible.voice_id);
+        if (!currentVoice) {
+          // Use the server-side selectEdgeVoiceForCharacter logic via the API
+          const res = await fetch(`/api/stories/${storyId}/voice/select`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              characterId: member.characterId,
+              generatedVoiceId: `edge:auto:${member.characterId}`,
+            }),
+          });
+          if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.error ?? `Failed to assign voice for ${member.name}`);
+          }
+        }
+      }
+      // Start narration
+      const res = await fetch(`/api/stories/${storyId}/voice/narrate`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to start narration");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to narrate with Edge TTS");
+    } finally {
+      setAutoAssigning(false);
     }
   }
 
@@ -265,15 +305,15 @@ export function VoiceDirector({
                 >
                   {voiceId ? <Check className="h-4 w-4" aria-hidden /> : <Mic2 className="h-4 w-4" aria-hidden />}
                 </span>
-                <div>
-                  <p className="font-display text-sm font-semibold text-fg">{member.name}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="font-display text-sm font-semibold text-fg break-words">{member.name}</p>
                   {currentEdgeId ? (
-                    <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-success-fg">
-                      <CheckCircle2 className="h-3 w-3" aria-hidden />
-                      {EDGE_VOICES[currentEdgeId].name} ({EDGE_VOICES[currentEdgeId].lang})
+                    <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-success-fg truncate max-w-full">
+                      <CheckCircle2 className="h-3 w-3 shrink-0" aria-hidden />
+                      <span className="truncate">{EDGE_VOICES[currentEdgeId].name} ({EDGE_VOICES[currentEdgeId].lang})</span>
                     </p>
                   ) : voiceId ? (
-                    <p className="mt-0.5 text-xs text-fg-subtle">{voiceId.slice(0, 20)}…</p>
+                    <p className="mt-0.5 text-xs text-fg-subtle truncate">{voiceId.slice(0, 20)}…</p>
                   ) : (
                     <p className="mt-0.5 text-xs text-fg-subtle">No voice yet</p>
                   )}
@@ -330,14 +370,31 @@ export function VoiceDirector({
             Narrate unlocks once every character and the narrator have a voice.
           </p>
         )}
-        <button
-          onClick={() => void setSkipped(true)}
-          className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-bg-elev px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface hover:text-fg"
-        >
-          <SkipForward className="h-4 w-4" aria-hidden />
-          Skip narration for this story
-        </button>
-      </div>
+      <button
+        onClick={() => void narrateWithEdgeTts()}
+        disabled={autoAssigning || narrating}
+        className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-bg-elev px-4 py-2.5 text-sm font-medium text-fg-muted transition hover:bg-surface hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {autoAssigning || narrating ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            {autoAssigning ? "Assigning voices…" : "Starting…"}
+          </>
+        ) : (
+          <>
+            <Volume2 className="h-4 w-4" aria-hidden />
+            Narrate with Edge TTS (free, no API key)
+          </>
+        )}
+      </button>
+      <button
+        onClick={() => void setSkipped(true)}
+        className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-bg-elev px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface hover:text-fg"
+      >
+        <SkipForward className="h-4 w-4" aria-hidden />
+        Skip narration for this story
+  </button>
+</div>
     );
   }
 
@@ -369,17 +426,17 @@ export function VoiceDirector({
                 >
                   {voiceId ? <Check className="h-4 w-4" aria-hidden /> : <Mic2 className="h-4 w-4" aria-hidden />}
            </span>
-                <div>
-                  <p className="font-display text-sm font-semibold text-fg">{member.name}</p>
+                <div className="min-w-0 flex-1">
+                  <p className="font-display text-sm font-semibold text-fg break-words">{member.name}</p>
                   {voiceId ? (
-                    <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-success-fg">
-                      <CheckCircle2 className="h-3 w-3" aria-hidden />
-                      Voice cast · {voiceId.slice(0, 12)}…
-                </p>
+                    <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-success-fg truncate max-w-full">
+                      <CheckCircle2 className="h-3 w-3 shrink-0" aria-hidden />
+                      <span className="truncate">Voice cast · {voiceId.slice(0, 12)}…</span>
+                    </p>
                   ) : (
                     <p className="mt-0.5 text-xs text-fg-subtle">No voice yet</p>
                   )}
-            </div>
+                </div>
           </div>
               <button
                 onClick={() => void design(member.characterId)}
@@ -460,6 +517,23 @@ export function VoiceDirector({
           Narrate unlocks once every character and the narrator have a voice.
   </p>
       )}
+      <button
+        onClick={() => void narrateWithEdgeTts()}
+        disabled={autoAssigning || narrating}
+        className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-bg-elev px-4 py-2.5 text-sm font-medium text-fg-muted transition hover:bg-surface hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {autoAssigning || narrating ? (
+          <>
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            {autoAssigning ? "Assigning voices…" : "Starting…"}
+          </>
+        ) : (
+          <>
+            <Volume2 className="h-4 w-4" aria-hidden />
+            Narrate with Edge TTS (free, no API key)
+          </>
+        )}
+      </button>
       <button
         onClick={() => void setSkipped(true)}
         className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-border bg-bg-elev px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface hover:text-fg"

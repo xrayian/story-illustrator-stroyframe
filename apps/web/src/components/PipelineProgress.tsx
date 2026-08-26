@@ -31,7 +31,12 @@ const STAGES: Stage[] = [
   { key: "visual", label: "Visuals", description: "Illustrations + reference portraits", icon: ImageIcon },
 ];
 
-function computeStages(status: string, voiceSkipped: boolean, visualSkipped: boolean) {
+function computeStages(
+  status: string,
+  voiceSkipped: boolean,
+  visualSkipped: boolean,
+  failedStage: string | null
+) {
   const map: Record<string, StageState> = {
     ingest: "done",
     analyze: "pending",
@@ -39,9 +44,20 @@ function computeStages(status: string, voiceSkipped: boolean, visualSkipped: boo
     voice: "pending",
     visual: "pending",
   };
-  if (status === "failed" || status === "analysis_failed") {
-    if (status === "analysis_failed") map.analyze = "failed";
-    else map.visual = "failed";
+  if (status === "analysis_failed") {
+    map.analyze = "failed";
+  } else if (status === "failed") {
+    const stage = failedStage ?? "visual";
+    if (stage === "voice") {
+      map.analyze = "done";
+      map.cast = "done";
+      map.voice = "failed";
+    } else {
+      map.analyze = "done";
+      map.cast = "done";
+      map.voice = voiceSkipped ? "skipped" : "done";
+      map.visual = "failed";
+    }
   }
   if (status === "analyzing") {
     map.analyze = "current";
@@ -97,8 +113,8 @@ function labelClasses(state: StageState): string {
 }
 
 export function PipelineProgress({ detail }: { detail: StoryDetail }) {
-  const { status, voice_skipped, visual_skipped } = detail.story;
-  const states = computeStages(status, voice_skipped, visual_skipped);
+  const { status, voice_skipped, visual_skipped, failed_stage } = detail.story;
+  const states = computeStages(status, voice_skipped, visual_skipped, failed_stage);
   return (
     <ol className="rounded-xl border border-border bg-bg-elev p-2 shadow-card">
       {STAGES.map((stage, i) => {

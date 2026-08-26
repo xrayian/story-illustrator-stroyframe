@@ -49,7 +49,7 @@ export async function imageGenerationProcessor(job: Job): Promise<object> {
     const message = err instanceof Error ? err.message : String(err);
     await db
       .update(stories)
-      .set({ status: "failed", updated_at: new Date() })
+      .set({ status: "failed", failed_stage: "visual", updated_at: new Date() })
       .where(eq(stories.id, storyId));
     throw new Error(`image generation failed: ${message}`);
   }

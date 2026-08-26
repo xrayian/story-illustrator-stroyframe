@@ -45,6 +45,7 @@ export async function POST(
     .set({
       visual_skipped: skip,
       status: skip ? "ready" : "cast_review",
+      failed_stage: null,
       updated_at: new Date(),
     })
     .where(eq(stories.id, id));

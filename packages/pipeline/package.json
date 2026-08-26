@@ -17,7 +17,9 @@
     "@storyframe/schemas": "workspace:*",
     "@storyframe/storage": "workspace:*",
     "@storyframe/svmp": "workspace:*",
+    "@types/ws": "^8.18.1",
     "drizzle-orm": "^0.45.2",
+    "ws": "^8.21.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {

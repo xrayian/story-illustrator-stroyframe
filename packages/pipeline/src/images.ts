@@ -35,7 +35,8 @@ export const PRUNA_DEFAULT_BASE_URL = "https://api.pruna.ai";
 export const STYLE_BIBLE =
   "Children's picture-book illustration, warm and rich palette, soft diffused " +
   "lighting, gentle painterly texture, cinematic composition, consistent character " +
-  "design, no text, no watermarks, no frames.";
+  "design, no text, no speech bubbles, no dialogue bubbles, no thought bubbles, " +
+  "no words, no watermarks, no frames.";
 
 /** Relative web path that streams an R2 object back to the browser. */
 export function assetPublicPath(storyId: string, key: string): string {
@@ -335,6 +336,7 @@ export function buildPortraitPrompt(identityPrompt: string, styleBible = STYLE_B
     `Character reference sheet: head-and-shoulders portrait, neutral expression, ` +
     `plain background. This image is the canonical anchor for the character and ` +
     `will be used to keep them consistent in every scene illustration.\n` +
+    `Strict constraint: do NOT include any speech bubbles, thought bubbles, text, labels, or captions in the image.\n` +
     `Style: ${styleBible}`
   );
 }
@@ -363,7 +365,8 @@ export function buildScenePrompt(
     (scene.attachPortraits
       ? "Use the attached reference portraits to keep the characters' appearance exactly consistent (this is the re-anchor).\n"
       : "") +
-    "Compose a single coherent scene; characters must match their reference appearance."
+    "Compose a single coherent scene; characters must match their reference appearance.\n" +
+    "Strict constraint: pure visual illustration only — do NOT render any speech bubbles, thought bubbles, dialogue text, comic callouts, subtitles, or captions inside the image."
   );
 }
 

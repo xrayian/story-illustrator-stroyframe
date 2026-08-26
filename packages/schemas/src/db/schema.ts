@@ -42,6 +42,8 @@ export const stories = pgTable("stories", {
   analysis_model: text("analysis_model"),
   /** Provider that succeeded for analysis: "gemini" | "kimi" | null. */
   analysis_provider: text("analysis_provider"),
+  /** Which pipeline stage failed when status is "failed": "voice" | "visual" | null. */
+  failed_stage: text("failed_stage"),
   created_at: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updated_at: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

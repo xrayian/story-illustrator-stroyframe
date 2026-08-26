@@ -8,6 +8,16 @@ export const characterSchema = z.object({
   name: z.string().min(1),
   aliases: z.array(z.string().min(1)).default([]),
   role: z.string().min(1),
+  /** Inferred from context — leave blank if zero signal. */
+  apparent_age_range: z.string().optional().default(""),
+  /** Inferred from context — leave blank if zero signal. */
+  gender_expression: z.string().optional().default(""),
+  /** Inferred from context — leave blank if zero signal. */
+  ethnicity_or_culture_cues: z.string().optional().default(""),
+  /** Inferred from context — leave blank if zero signal. */
+  physical_description: z.string().optional().default(""),
+  /** Inferred from context — leave blank if zero signal. */
+  personality_traits: z.array(z.string()).optional().default([]),
 });
 export type Character = z.infer<typeof characterSchema>;
 

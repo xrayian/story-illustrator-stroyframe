@@ -45,6 +45,7 @@ export async function POST(
     .set({
       voice_skipped: skipValue,
       status: skipValue ? "ready" : "cast_review",
+      failed_stage: null,
       updated_at: new Date(),
     })
     .where(eq(stories.id, id));

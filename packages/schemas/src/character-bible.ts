@@ -1,8 +1,8 @@
 import { z } from "zod";
 
 /**
- * Sentinel value for demographic fields the text gives no explicit evidence
- * for. Never replace this with a guess — hard rule, see AGENTS.md.
+ * Sentinel value for demographic fields where there is genuinely zero signal
+ * in the text. Prefer inferring from context over leaving unspecified.
  */
 export const UNSPECIFIED = "unspecified";
 
@@ -12,7 +12,7 @@ export const characterBibleSchema = z.object({
   role: z.string().min(1),
   apparent_age_range: z.string(),
   gender_expression: z.string(),
-  /** Only set when the text explicitly states or clearly implies it. */
+  /** Infer from context clues (setting, dialogue, cultural references). Only "unspecified" if zero signal. */
   ethnicity_or_culture_cues: z.string(),
   physical_description: z.string(),
   personality_traits: z.array(z.string()),

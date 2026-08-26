@@ -21,6 +21,7 @@ export async function GET(
       source_url: stories.source_url,
       voice_skipped: stories.voice_skipped,
       visual_skipped: stories.visual_skipped,
+      failed_stage: stories.failed_stage,
       analysis_model: stories.analysis_model,
       analysis_provider: stories.analysis_provider,
       created_at: stories.created_at,
@@ -69,8 +70,8 @@ export async function GET(
   const env = getEnv();
   const showRaw = env.NEXT_PUBLIC_SHOW_ANALYSIS_MODEL ?? env.SHOW_ANALYSIS_MODEL;
   const showAnalysisModel = showRaw === undefined ? true : showRaw.toLowerCase() !== "false" && showRaw !== "0";
-  const primaryModel = env.MODAL_QWEN_MODEL ?? "Qwen/Qwen3.8-2.4T-A95B";
-  const fallbackModel = env.GEMINI_ANALYSIS_MODEL ?? "gemini-3.1-pro-preview";
+  const primaryModel = env.GEMINI_ANALYSIS_MODEL ?? "gemini-3.5-flash";
+  const fallbackModel = env.MODAL_QWEN_MODEL ?? "Qwen/Qwen3.8-2.4T-A95B";
 
   return NextResponse.json({
     story,

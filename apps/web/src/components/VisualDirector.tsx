@@ -102,11 +102,11 @@ export function VisualDirector({
         <div>
           <h3 className="font-display text-base font-semibold text-fg">Visual Director</h3>
           <p className="mt-1 text-sm text-fg-muted">
-            Generate a canonical reference portrait for each character, then an illustration
-            for every scene (style bible + re-anchored portraits). Images route through
+            Generate a canonical reference portrait for each character, then a clean illustration
+            for every scene (style bible + re-anchored portraits, strictly no speech or text bubbles). Images route through
             Pruna, Gemini, Hugging Face, or the free Pollinations endpoint — errors surface here
             rather than failing silently.
-       </p>
+          </p>
       </div>
     </div>
       <div className="flex flex-wrap gap-2">
@@ -225,16 +225,16 @@ export function SceneGallery({
                 </div>
                 {m ? (
                   <>
-                    <p className="line-clamp-2 text-xs leading-relaxed text-fg-muted">
+                    <p className="line-clamp-2 text-xs leading-relaxed text-fg-muted break-words">
                       <span className="font-medium text-fg">{m.setting}</span>
                       {m.time_of_day ? ` · ${m.time_of_day}` : ""} · {m.mood}
                     </p>
                     <div className="flex flex-wrap gap-1">
                       {m.characters_present.length > 0 ? (
                         m.characters_present.map((cid) => (
-                          <span key={cid} className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] text-fg-muted">
-                            <User className="h-3 w-3" aria-hidden />
-                            {nameById.get(cid) ?? cid}
+                          <span key={cid} className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] text-fg-muted max-w-full truncate">
+                            <User className="h-3 w-3 shrink-0" aria-hidden />
+                            <span className="truncate">{nameById.get(cid) ?? cid}</span>
                           </span>
                         ))
                       ) : (
@@ -242,14 +242,14 @@ export function SceneGallery({
                       )}
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5 border-t border-border pt-2">
-                      <Mic2 className="h-3 w-3 text-fg-subtle" aria-hidden />
+                      <Mic2 className="h-3 w-3 text-fg-subtle shrink-0" aria-hidden />
                       <span className="text-[11px] text-fg-subtle">
                         {m.lines.length} line{m.lines.length === 1 ? "" : "s"}
                       </span>
                       {speakers.length > 0 && (
                         <span className="flex flex-wrap gap-1">
                           {speakers.map((sid) => (
-                            <span key={sid} className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+                            <span key={sid} className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary max-w-full truncate">
                               {nameById.get(sid) ?? sid}
                             </span>
                           ))}
@@ -257,7 +257,7 @@ export function SceneGallery({
                       )}
                     </div>
                     {m.lines.length > 0 && (
-                      <p className="line-clamp-2 text-xs italic text-fg-subtle">“{m.lines[0].text.slice(0, 120)}{m.lines[0].text.length > 120 ? "…" : ""}”</p>
+                      <p className="line-clamp-2 text-xs italic text-fg-subtle break-words">“{m.lines[0].text.slice(0, 120)}{m.lines[0].text.length > 120 ? "…" : ""}”</p>
                     )}
                   </>
                 ) : (

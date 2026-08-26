@@ -38,6 +38,7 @@ export interface StoryDetail {
     source_url: string | null;
     voice_skipped: boolean;
     visual_skipped: boolean;
+    failed_stage: string | null;
     analysis_model: string | null;
     analysis_provider: string | null;
     created_at: string;
@@ -216,7 +217,7 @@ export function StoryView({ storyId }: { storyId: string }) {
       {story.status === "failed" ? (
         <>
           <PipelineProgress detail={detail} />
-          <PipelineFailed storyId={storyId} />
+          <PipelineFailed storyId={storyId} failedStage={story.failed_stage} />
         </>
       ) : null}
    </div>
@@ -240,25 +241,25 @@ function StoryHeader({
 }) {
   return (
     <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-4">
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <p className="text-xs font-semibold uppercase tracking-wider text-fg-subtle">Story</p>
-        <h1 className="mt-1 font-display text-2xl font-bold tracking-tight text-fg text-balance sm:text-3xl">
+        <h1 className="mt-1 font-display text-2xl font-bold tracking-tight text-fg break-words sm:text-3xl">
           {title}
         </h1>
         {showAnalysisModel && (
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <span
-              className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
+              className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary break-all sm:break-normal"
               title={`Fallback: ${fallbackModel} if Qwen is unavailable`}
             >
-              <Sparkles className="h-3 w-3" aria-hidden />
+              <Sparkles className="h-3 w-3 shrink-0" aria-hidden />
               Analysis: {analysisModel}
             </span>
-            <span className="text-xs text-fg-subtle">env toggle: NEXT_PUBLIC_SHOW_ANALYSIS_MODEL</span>
+            <span className="text-[11px] sm:text-xs text-fg-subtle">env toggle: NEXT_PUBLIC_SHOW_ANALYSIS_MODEL</span>
           </div>
         )}
-    </div>
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-bg-elev px-3 py-1 text-xs font-medium text-fg-muted shadow-card">
+      </div>
+      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-bg-elev px-3 py-1 text-xs font-medium text-fg-muted shadow-card">
         <StatusIcon className="h-3.5 w-3.5 text-primary" aria-hidden />
         {statusLabel}
       </span>
@@ -375,8 +376,10 @@ function ReenableNarration({ storyId }: { storyId: string }) {
   );
 }
 
-function PipelineFailed({ storyId }: { storyId: string }) {
+function PipelineFailed({ storyId, failedStage }: { storyId: string; failedStage: string | null }) {
   const [retrying, setRetrying] = useState(false);
+  const [retryingVoice, setRetryingVoice] = useState(false);
+  const isVoice = failedStage === "voice";
   async function retry() {
     setRetrying(true);
     try {
@@ -386,33 +389,54 @@ function PipelineFailed({ storyId }: { storyId: string }) {
       setRetrying(false);
     }
   }
+  async function retryVoice() {
+    setRetryingVoice(true);
+    try {
+      await fetch(`/api/stories/${storyId}/voice/retry`, { method: "POST" });
+      location.reload();
+    } catch {
+      setRetryingVoice(false);
+    }
+  }
   return (
     <div className="space-y-4 rounded-xl border border-danger/30 bg-danger-bg p-5">
       <div className="flex items-start gap-3">
         <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-danger text-primary-fg">
           <AlertCircle className="h-5 w-5" aria-hidden />
        </span>
-        <div>
+       <div>
           <p className="font-display text-base font-semibold text-danger-fg">Generation failed</p>
           <p className="mt-1 text-sm text-danger-fg/85">
-            The visual stage couldn&apos;t complete (the Gemini, Hugging Face, and free
-            Pollinations image providers all failed — quota or safety-filter errors surface
-            here). Finished portraits and illustrations are kept, so retrying skips them.
-            You can also skip visuals instead.
+            {isVoice
+              ? "The voice stage couldn\u2019t complete (Edge TTS synthesis failed). You can retry narration from the Cast Review stage, or skip visuals and proceed."
+              : "The visual stage couldn\u2019t complete (the Pruna, Gemini, Hugging Face, and free Pollinations image providers all failed \u2014 quota or safety-filter errors surface here). Finished portraits and illustrations are kept, so retrying skips them. You can also skip visuals instead."}
          </p>
        </div>
      </div>
       <div className="flex flex-wrap gap-2">
-        <button
-          onClick={() => void retry()}
-          disabled={retrying}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-danger px-3 py-1.5 text-sm font-semibold text-primary-fg transition hover:bg-danger/90 disabled:opacity-50"
-        >
-          {retrying ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
-          {retrying ? "Retrying…" : "Retry visuals"}
-       </button>
-        <SkipVisualsButton storyId={storyId} />
-     </div>
+        {isVoice ? (
+          <button
+            onClick={() => void retryVoice()}
+            disabled={retryingVoice}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-danger px-3 py-1.5 text-sm font-semibold text-primary-fg transition hover:bg-danger/90 disabled:opacity-50"
+          >
+            {retryingVoice ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
+            {retryingVoice ? "Retrying…" : "Retry narration"}
+          </button>
+        ) : (
+          <>
+            <button
+              onClick={() => void retry()}
+              disabled={retrying}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-danger px-3 py-1.5 text-sm font-semibold text-primary-fg transition hover:bg-danger/90 disabled:opacity-50"
+            >
+              {retrying ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <RefreshCw className="h-3.5 w-3.5" aria-hidden />}
+              {retrying ? "Retrying…" : "Retry visuals"}
+            </button>
+            <SkipVisualsButton storyId={storyId} />
+          </>
+        )}
+      </div>
    </div>
   );
 }

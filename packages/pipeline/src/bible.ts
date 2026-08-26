@@ -6,19 +6,19 @@ import {
 
 /**
  * Phase 2: derives a CharacterBible from a StoryManifest character.
- * Demographic fields the text gave no evidence for are left as UNSPECIFIED —
- * never guessed. The review UI shows them empty for the user to fill in.
+ * Uses the demographic fields inferred by the analysis; falls back to
+ * UNSPECIFIED/empty only when the manifest field is blank or missing.
  */
 export function deriveBible(character: Character): CharacterBible {
   return {
     id: character.id,
     name: character.name,
     role: character.role,
-    apparent_age_range: UNSPECIFIED,
-    gender_expression: UNSPECIFIED,
-    ethnicity_or_culture_cues: UNSPECIFIED,
-    physical_description: "",
-    personality_traits: [],
+    apparent_age_range: character.apparent_age_range?.trim() || UNSPECIFIED,
+    gender_expression: character.gender_expression?.trim() || UNSPECIFIED,
+    ethnicity_or_culture_cues: character.ethnicity_or_culture_cues?.trim() || UNSPECIFIED,
+    physical_description: character.physical_description?.trim() || "",
+    personality_traits: character.personality_traits ?? [],
     voice_id: null,
     reference_image_url: null,
     locked_identity_prompt: "",

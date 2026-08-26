@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AlertCircle, Check, CheckCircle2, Loader2, User } from "lucide-react";
+import { AlertCircle, Check, CheckCircle2, Loader2, RefreshCw, User } from "lucide-react";
 import { UNSPECIFIED, type CharacterBible } from "@storyframe/schemas";
 import type { StoryCharacter } from "@/components/StoryView";
 
@@ -100,6 +100,24 @@ export function CastReview({
     }
   }
 
+  const [reanalyzing, setReanalyzing] = useState(false);
+
+  async function reanalyze() {
+    setReanalyzing(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/stories/${storyId}/analyze`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error ?? "Failed to re-analyze");
+      }
+      location.reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to re-analyze");
+      setReanalyzing(false);
+    }
+  }
+
   const inputClass =
     "mt-1 w-full rounded-lg border border-border bg-bg px-3 py-1.5 text-sm text-fg shadow-sm placeholder:text-fg-subtle focus:border-primary focus:outline-none focus:ring-2 focus:ring-ring";
 
@@ -171,24 +189,44 @@ export function CastReview({
    </div>
       )}
 
-      <button
-        onClick={() => void approve()}
-        disabled={saving || !allNamed}
-        className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-success px-4 py-2.5 text-sm font-semibold text-primary-fg shadow-lift transition hover:bg-success/90 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {saving ? (
-          <>
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-            Approving…
-       </>
-        ) : (
-          <>
-            <Check className="h-4 w-4" aria-hidden />
-            Approve cast
-       </>
-        )}
-  </button>
-</div>
+      <div className="flex gap-3">
+        <button
+          onClick={() => void reanalyze()}
+          disabled={reanalyzing || saving}
+          className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg border border-border bg-bg-elev px-4 py-2.5 text-sm font-medium text-fg-muted transition hover:bg-surface hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {reanalyzing ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              Re-analyzing…
+            </>
+          ) : (
+            <>
+              <RefreshCw className="h-4 w-4" aria-hidden />
+              Re-analyze
+            </>
+          )}
+        </button>
+
+        <button
+          onClick={() => void approve()}
+          disabled={saving || !allNamed || reanalyzing}
+          className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-success px-4 py-2.5 text-sm font-semibold text-primary-fg shadow-lift transition hover:bg-success/90 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {saving ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              Approving…
+            </>
+          ) : (
+            <>
+              <Check className="h-4 w-4" aria-hidden />
+              Approve cast
+            </>
+          )}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -205,12 +243,12 @@ function CharacterCard({
 }) {
   return (
     <div className="rounded-2xl border border-border bg-bg-elev p-5 shadow-card">
-      <div className="flex items-center gap-2.5">
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
+      <div className="flex items-center gap-2.5 min-w-0">
+        <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
           <User className="h-4 w-4" aria-hidden />
-    </span>
-        <h3 className="font-display text-sm font-semibold text-fg">{title}</h3>
-  </div>
+        </span>
+        <h3 className="font-display text-sm font-semibold text-fg break-words">{title}</h3>
+      </div>
       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Name">
           <input className={inputClass} value={fields.name} onChange={(e) => onChange("name", e.target.value)} />

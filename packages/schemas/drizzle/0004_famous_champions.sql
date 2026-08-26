@@ -1,0 +1,1 @@
+ALTER TABLE "stories" ADD COLUMN "failed_stage" text;

@@ -5,6 +5,7 @@ import {
   assertCastApproved,
   buildVoiceDescription,
   createVoiceFromPreview,
+  selectEdgeVoiceForCharacter,
 } from "@storyframe/pipeline";
 import { ensureNarratorRow } from "@storyframe/pipeline";
 import { characters } from "@storyframe/schemas/db";
@@ -50,7 +51,16 @@ export async function POST(
     const bible = await loadCharacterBible(db, id, characterId);
     let voiceId: string;
 
-    if (generatedVoiceId.startsWith("edge:")) {
+    if (generatedVoiceId.startsWith("edge:auto:")) {
+      // Auto-assign Edge TTS voice based on character demographics
+      const edgeVoiceId = selectEdgeVoiceForCharacter(
+        characterId,
+        bible.name,
+        undefined,
+        bible
+      );
+      voiceId = `edge:${edgeVoiceId}`;
+    } else if (generatedVoiceId.startsWith("edge:")) {
       // Edge TTS: store voice ID directly, no ElevenLabs API call needed
       voiceId = generatedVoiceId;
     } else {

@@ -41,7 +41,7 @@ export async function POST(
 
   await db
     .update(stories)
-    .set({ status: "voice_generation", updated_at: new Date() })
+    .set({ status: "voice_generation", failed_stage: null, updated_at: new Date() })
     .where(eq(stories.id, id));
 
   await getQueue().add(VOICE_TTS_JOB, { storyId: id });

@@ -43,7 +43,7 @@ export async function POST(
 
   await db
     .update(stories)
-    .set({ status: "visual_generation", visual_skipped: false, updated_at: new Date() })
+    .set({ status: "visual_generation", visual_skipped: false, failed_stage: null, updated_at: new Date() })
     .where(eq(stories.id, id));
 
   await getQueue().add(IMAGE_GENERATION_JOB, { storyId: id });

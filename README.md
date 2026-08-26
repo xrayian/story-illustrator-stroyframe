@@ -225,7 +225,7 @@ The full spec is in [`docs/svmp-format.md`](./docs/svmp-format.md). `packages/sv
 See [`AGENTS.md`](./AGENTS.md). Highlights:
 
 - **Build mode only** for anything that calls a paid Gemini/ElevenLabs endpoint, and only after the Phase 2 cast-review approval gate has fired for that story.
-- **AI-inferred character demographic fields must trace to explicit text evidence.** Leave a field `"unspecified"` rather than guess — this is a hard rule, not a style preference.
+- **AI-inferred character demographic fields: infer freely from context clues (dialogue, descriptions, names, cultural references, setting).** Only leave "unspecified" when there is genuinely zero signal. The one forbidden inference: do NOT assume ethnicity/race solely from a name.
 - **Shared types/schemas live in `packages/schemas`** (Zod). Imported by both the web app and the worker — never duplicate a schema.
 - **`docs/svmp-format.md` is the source of truth** for the bundle format. Keep the writer/reader/player in sync whenever the schema changes.
 - Do not hardcode API keys — read from env, fail loudly if missing.

@@ -2,6 +2,7 @@ import { config } from "dotenv";
 
 // Root .env lives one level up from the worker's working directory.
 config({ path: "../.env" });
+// Reload worker with updated pipeline
 
 import { Redis } from "ioredis";
 import { validateEnv } from "@storyframe/schemas/env";

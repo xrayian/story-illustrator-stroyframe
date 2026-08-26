@@ -268,22 +268,32 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sceneIdx]);
 
-  // Voice-skipped driver: wall-clock rAF advances currentTime when no audio.
-  // When browser TTS is speaking the current cue, we pause wall-clock so the
-  // utterance isn't cut off halfway by an early scene transition.
-  //
-  // Timing flow:
-  //   1. Clock advances until cue.start → TTS effect fires and starts speaking
-  //   2. Clock pauses while TTS is speaking (speechSynthesis.speaking = true)
-  //   3. TTS finishes → ttsFinishedAtRef is set → clock resumes
-  //   4. Clock advances through the 1s gap → next cue starts
-  //   5. Repeat
+  // 60fps Clock Driver:
+  // - When audio is playing, rAF continuously reads audio.currentTime for sub-frame subtitle sync
+  // - When voice is skipped / Web Speech TTS is used, rAF drives wall-clock and pauses during utterances
   useEffect(() => {
-    if (!playing || scene?.audioUrl) {
+    if (!playing) {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
       return;
     }
+
+    if (scene?.audioUrl) {
+      const tick = () => {
+        const audio = audioRef.current;
+        if (audio && !audio.paused && Number.isFinite(audio.currentTime)) {
+          const global = scene.startOffset + audio.currentTime;
+          setCurrentTime(global);
+        }
+        rafRef.current = requestAnimationFrame(tick);
+      };
+      rafRef.current = requestAnimationFrame(tick);
+      return () => {
+        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      };
+    }
+
     lastTickRef.current = performance.now();
     const tick = (now: number) => {
       const local = currentTime - scene.startOffset;
@@ -295,8 +305,7 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
         typeof window !== "undefined" &&
         window.speechSynthesis.speaking;
 
-      // Pause wall-clock while TTS is actively speaking AND we're inside
-      // a cue's time window.
+      // Pause wall-clock while TTS is actively speaking AND we're inside a cue's time window
       if (isSpeaking && currentCue) {
         lastTickRef.current = now;
         rafRef.current = requestAnimationFrame(tick);
@@ -314,7 +323,8 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
             return totalDuration;
           }
           setSceneIdx(nextIdx);
-          return bundle.scenes[nextIdx].startOffset;
+          const nextScene = bundle.scenes[nextIdx];
+          return nextScene.startOffset;
         }
         return next;
       });
@@ -327,7 +337,7 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
     };
   }, [playing, scene, sceneIdx, bundle.scenes.length, bundle.scenes, totalDuration, rate, needsTts, ttsMuted, ttsSupported, currentTime]);
 
-  // Voiced driver: <audio> element drives currentTime for the current scene.
+  // Voiced driver: <audio> element controls playback and speed
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !scene?.audioUrl) return;
@@ -339,28 +349,42 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
     }
   }, [playing, rate, scene?.audioUrl]);
 
-  const onAudioTimeUpdate = useCallback(() => {
-    const audio = audioRef.current;
-    if (!audio || !scene) return;
-    // audio.currentTime is already in real seconds — no playbackRate scaling needed
-    const global = scene.startOffset + audio.currentTime;
-    setCurrentTime(global);
-    if (audio.ended) {
-      const nextIdx = sceneIdx + 1;
+  const advanceToScene = useCallback(
+    (nextIdx: number, startPlaying = true) => {
+      cancelTts();
+      lastSpokenCueRef.current = null;
+      ttsFinishedAtRef.current = 0;
       if (nextIdx < bundle.scenes.length) {
         setSceneIdx(nextIdx);
-        const next = bundle.scenes[nextIdx];
-        if (next.audioUrl && audioRef.current) {
-          audioRef.current.src = next.audioUrl;
-          audioRef.current.currentTime = 0;
-          if (playing) audioRef.current.play().catch(() => setPlaying(false));
+        const nextScene = bundle.scenes[nextIdx];
+        const nextTime = nextScene.startOffset;
+        setCurrentTime(nextTime);
+        const audio = audioRef.current;
+        if (audio && nextScene.audioUrl) {
+          audio.src = nextScene.audioUrl;
+          audio.currentTime = 0;
+          audio.playbackRate = rate;
+          if (startPlaying) {
+            audio.play().catch(() => {});
+          }
         }
       } else {
         setPlaying(false);
         setCurrentTime(totalDuration);
       }
+    },
+    [bundle.scenes, totalDuration, rate, cancelTts]
+  );
+
+  const onAudioTimeUpdate = useCallback(() => {
+    const audio = audioRef.current;
+    if (!audio || !scene) return;
+    const global = scene.startOffset + audio.currentTime;
+    setCurrentTime(global);
+    if (audio.ended) {
+      advanceToScene(sceneIdx + 1, playing);
     }
-  }, [scene, sceneIdx, bundle.scenes, totalDuration, playing]);
+  }, [scene, sceneIdx, advanceToScene, playing]);
 
   const seek = useCallback(
     (globalTime: number) => {
@@ -370,46 +394,45 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
       const target = bundle.scenes.findIndex(
         (s) => globalTime >= s.startOffset && globalTime < s.startOffset + s.duration
       );
-      const scene = target === -1 ? bundle.scenes[bundle.scenes.length - 1] : bundle.scenes[target];
+      const targetScene = target === -1 ? bundle.scenes[bundle.scenes.length - 1] : bundle.scenes[target];
       const idx = target === -1 ? bundle.scenes.length - 1 : target;
       setSceneIdx(idx);
       setCurrentTime(globalTime);
       const audio = audioRef.current;
-      if (audio && scene.audioUrl) {
-        audio.src = scene.audioUrl;
-        audio.currentTime = Math.max(0, globalTime - scene.startOffset);
+      if (audio && targetScene.audioUrl) {
+        audio.src = targetScene.audioUrl;
+        audio.playbackRate = rate;
+        audio.currentTime = Math.max(0, globalTime - targetScene.startOffset);
         if (playing) audio.play().catch(() => setPlaying(false));
       }
     },
-    [bundle.scenes, playing, cancelTts]
+    [bundle.scenes, playing, rate, cancelTts]
   );
 
   const goPrev = useCallback(() => {
-    cancelTts();
-    lastSpokenCueRef.current = null;
-    ttsFinishedAtRef.current = 0;
-    setSceneIdx((i) => Math.max(0, i - 1));
-    const s = bundle.scenes[Math.max(0, sceneIdx - 1)];
-    setCurrentTime(s?.startOffset ?? 0);
-  }, [bundle.scenes, sceneIdx, cancelTts]);
+    const prevIdx = Math.max(0, sceneIdx - 1);
+    advanceToScene(prevIdx, playing);
+  }, [sceneIdx, advanceToScene, playing]);
 
   const goNext = useCallback(() => {
-    cancelTts();
-    lastSpokenCueRef.current = null;
-    ttsFinishedAtRef.current = 0;
     const nextIdx = Math.min(bundle.scenes.length - 1, sceneIdx + 1);
-    setSceneIdx(nextIdx);
-    setCurrentTime(bundle.scenes[nextIdx]?.startOffset ?? 0);
-  }, [bundle.scenes, sceneIdx, cancelTts]);
+    advanceToScene(nextIdx, playing);
+  }, [bundle.scenes.length, sceneIdx, advanceToScene, playing]);
 
   useEffect(() => {
     const audio = audioRef.current;
     if (audio && scene?.audioUrl) {
-      audio.src = scene.audioUrl;
-      audio.currentTime = Math.max(0, currentTime - scene.startOffset);
+      audio.playbackRate = rate;
+      if (audio.src !== scene.audioUrl) {
+        audio.src = scene.audioUrl;
+        audio.currentTime = Math.max(0, currentTime - scene.startOffset);
+      }
+      if (playing && audio.paused) {
+        audio.play().catch(() => {});
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sceneIdx]);
+  }, [sceneIdx, playing, rate]);
 
   // Resolve display voice name for the current cue (shown in cue bar).
   const displayVoiceName = useMemo(() => {
@@ -423,7 +446,7 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
     return (
       <div className="rounded-xl border border-border bg-bg-elev p-6 text-sm text-fg-muted shadow-card">
         No scenes to play.
-  </div>
+      </div>
     );
   }
 
@@ -431,9 +454,9 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
   const sceneProgress = scene.duration > 0 ? Math.min(1, sceneLocal / scene.duration) : 0;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3 sm:space-y-4">
       {/* Stage — scene image(s) with beat-synced carousel; caption bar below. */}
-      <div className="relative aspect-video w-full overflow-hidden rounded-2xl border border-border bg-black shadow-lift">
+      <div className="relative aspect-video w-full overflow-hidden rounded-xl sm:rounded-2xl border border-border bg-black shadow-lift">
         {scene.imageUrls.length > 0 ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -454,7 +477,7 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
 
         {/* Beat indicator dots — show which of the 3 images is active */}
         {scene.imageUrls.length > 1 && (
-          <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 rounded-full bg-black/60 px-2.5 py-1 backdrop-blur-sm">
+          <div className="absolute bottom-2.5 sm:bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 rounded-full bg-black/60 px-2.5 py-1 backdrop-blur-sm">
             {scene.imageUrls.map((_, i) => (
               <div
                 key={i}
@@ -468,35 +491,35 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
           </div>
         )}
 
-        <div className="absolute left-3 top-3 rounded-full bg-black/60 px-3 py-1 text-xs font-medium text-white backdrop-blur-sm">
+        <div className="absolute left-2.5 top-2.5 sm:left-3 sm:top-3 rounded-full bg-black/60 px-2.5 py-0.5 sm:px-3 sm:py-1 text-[11px] sm:text-xs font-medium text-white backdrop-blur-sm">
           Scene {sceneIdx + 1} / {bundle.scenes.length}
         </div>
-        <div className="absolute right-3 top-3 rounded-full bg-black/60 px-3 py-1 text-xs text-white/90 backdrop-blur-sm">
+        <div className="absolute right-2.5 top-2.5 sm:right-3 sm:top-3 max-w-[48%] sm:max-w-xs truncate rounded-full bg-black/60 px-2.5 py-0.5 sm:px-3 sm:py-1 text-[11px] sm:text-xs text-white/90 backdrop-blur-sm">
           {scene.manifest.setting}
         </div>
-  </div>
+      </div>
 
       {/* Dedicated cue bar — below the stage so scene badge and dialogue never overlap. */}
-      <div className="rounded-xl border border-border bg-bg-elev p-4 shadow-card">
+      <div className="rounded-xl border border-border bg-bg-elev p-3.5 sm:p-4 shadow-card">
         {displayCue ? (
-          <div className="flex items-center gap-3">
-            <span className="shrink-0 rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold uppercase tracking-wider text-primary">
+          <div className="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-3">
+            <span className="self-start shrink-0 rounded-full bg-primary/10 px-2.5 py-0.5 sm:py-1 text-[11px] sm:text-xs font-semibold uppercase tracking-wider text-primary">
               {speakerName(bundle, displayCue.speakerId)}
             </span>
             <div className="min-w-0 flex-1 space-y-1">
-              <p className="text-sm leading-relaxed text-fg">{displayCue.text}</p>
+              <p className="text-sm sm:text-base leading-relaxed text-fg break-words font-normal sm:font-medium">{displayCue.text}</p>
               {needsTts && displayVoiceName && (
-                <p className="text-xs text-fg-subtle">Voice: {displayVoiceName} · pitch {pitchForSpeaker(displayCue.speakerId, speakerOrder).toFixed(2)}</p>
+                <p className="text-[11px] sm:text-xs text-fg-subtle truncate max-w-full">Voice: {displayVoiceName} · pitch {pitchForSpeaker(displayCue.speakerId, speakerOrder).toFixed(2)}</p>
               )}
             </div>
           </div>
         ) : (
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm text-fg-muted">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 sm:gap-3">
+            <p className="text-xs sm:text-sm text-fg-muted break-words">
               <span className="font-medium text-fg">{scene.manifest.setting}</span>
               <span className="text-fg-subtle"> · {scene.manifest.mood} · {scene.manifest.time_of_day}</span>
             </p>
-            <span className="shrink-0 text-xs text-fg-subtle">{scene.cues.length} cue{scene.cues.length === 1 ? "" : "s"}</span>
+            <span className="shrink-0 text-[11px] sm:text-xs text-fg-subtle">{scene.cues.length} cue{scene.cues.length === 1 ? "" : "s"}</span>
           </div>
         )}
       </div>
@@ -505,43 +528,47 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
         ref={audioRef}
         onTimeUpdate={onAudioTimeUpdate}
         onEnded={() => {
-          const nextIdx = sceneIdx + 1;
-          if (nextIdx < bundle.scenes.length) setSceneIdx(nextIdx);
-          else setPlaying(false);
+          advanceToScene(sceneIdx + 1, playing);
         }}
         hidden={!scene.audioUrl}
         preload="auto"
       />
 
-      <div className="space-y-3 rounded-2xl border border-border bg-bg-elev p-4 shadow-card">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="space-y-3 rounded-xl sm:rounded-2xl border border-border bg-bg-elev p-3 sm:p-4 shadow-card">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
           <button
-            onClick={() => setPlaying((p) => !p)}
-            disabled={currentTime >= totalDuration && !playing}
-            className="inline-flex items-center gap-1.5 rounded-full bg-primary px-5 py-2 text-sm font-semibold text-primary-fg shadow-lift transition hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => {
+              if (currentTime >= totalDuration) {
+                seek(0);
+                setPlaying(true);
+              } else {
+                setPlaying((p) => !p);
+              }
+            }}
+            className="inline-flex items-center gap-1.5 rounded-full bg-primary px-4 py-2 sm:px-5 sm:py-2 text-xs sm:text-sm font-semibold text-primary-fg shadow-lift transition hover:bg-primary-hover active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
             aria-label={playing ? "Pause" : "Play"}
           >
             {playing ? <Pause className="h-4 w-4" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}
             {playing ? "Pause" : "Play"}
-         </button>
+          </button>
           <button
             onClick={goPrev}
             disabled={sceneIdx === 0}
-            className="inline-flex items-center gap-1 rounded-lg border border-border bg-bg-elev px-2.5 py-1.5 text-sm text-fg-muted transition hover:bg-surface hover:text-fg disabled:cursor-not-allowed disabled:opacity-30"
+            className="inline-flex items-center gap-1 rounded-lg border border-border bg-bg-elev px-2.5 py-1.5 text-xs sm:text-sm text-fg-muted transition hover:bg-surface hover:text-fg disabled:cursor-not-allowed disabled:opacity-30"
             aria-label="Previous scene"
           >
-            <ChevronLeft className="h-4 w-4" aria-hidden />
+            <ChevronLeft className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
             Prev
-  </button>
+          </button>
           <button
             onClick={goNext}
             disabled={sceneIdx >= bundle.scenes.length - 1}
-            className="inline-flex items-center gap-1 rounded-lg border border-border bg-bg-elev px-2.5 py-1.5 text-sm text-fg-muted transition hover:bg-surface hover:text-fg disabled:cursor-not-allowed disabled:opacity-30"
+            className="inline-flex items-center gap-1 rounded-lg border border-border bg-bg-elev px-2.5 py-1.5 text-xs sm:text-sm text-fg-muted transition hover:bg-surface hover:text-fg disabled:cursor-not-allowed disabled:opacity-30"
             aria-label="Next scene"
           >
             Next
-            <ChevronRight className="h-4 w-4" aria-hidden />
-  </button>
+            <ChevronRight className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />
+          </button>
           {(() => {
             const hasTtsCues = bundle.scenes.some((s) => s.cues.length > 0 && !s.audioUrl);
             const showTtsToggle = ttsSupported && (bundle.manifest.voice_skipped || hasTtsCues);
@@ -554,13 +581,13 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
                 }}
                 aria-label={ttsMuted ? "Unmute browser narration" : "Mute browser narration"}
                 title={ttsMuted ? "Unmute browser narration" : "Mute browser narration"}
-                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-sm transition ${
+                className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs sm:text-sm transition ${
                   ttsMuted
                     ? "border-border bg-surface text-fg-muted"
                     : "border-primary/30 bg-primary/10 text-primary hover:bg-primary/15"
                 }`}
               >
-                {ttsMuted ? <VolumeX className="h-4 w-4" aria-hidden /> : <Volume2 className="h-4 w-4" aria-hidden />}
+                {ttsMuted ? <VolumeX className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden /> : <Volume2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" aria-hidden />}
                 {ttsMuted ? "Muted" : "Browser voice"}
               </button>
             ) : null;
@@ -568,13 +595,13 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
           <div className="relative ml-auto">
             <button
               onClick={() => setSpeedMenuOpen((o) => !o)}
-              className="inline-flex items-center gap-1 rounded-lg border border-border bg-bg-elev px-2.5 py-1.5 text-sm text-fg-muted transition hover:bg-surface hover:text-fg"
+              className="inline-flex items-center gap-1 rounded-lg border border-border bg-bg-elev px-2.5 py-1.5 text-xs sm:text-sm text-fg-muted transition hover:bg-surface hover:text-fg"
               aria-label="Playback speed"
             >
               {rate}x
-  </button>
+            </button>
             {speedMenuOpen && (
-              <div className="absolute right-0 z-10 mt-1 overflow-hidden rounded-lg border border-border bg-bg-elev p-1 shadow-lift">
+              <div className="absolute right-0 z-20 mt-1 overflow-hidden rounded-lg border border-border bg-bg-elev p-1 shadow-lift">
                 {SPEEDS.map((s) => (
                   <button
                     key={s}
@@ -582,22 +609,22 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
                       setRate(s);
                       setSpeedMenuOpen(false);
                     }}
-                    className={`block w-full rounded px-3 py-1 text-left text-sm transition ${
+                    className={`block w-full rounded px-3 py-1 text-left text-xs sm:text-sm transition ${
                       s === rate
                         ? "bg-primary text-primary-fg"
                         : "text-fg-muted hover:bg-surface hover:text-fg"
                     }`}
                   >
                     {s}x
-        </button>
+                  </button>
                 ))}
-     </div>
+              </div>
             )}
-  </div>
-  </div>
+          </div>
+        </div>
 
-        <div className="flex items-center gap-3">
-          <span className="font-mono text-xs tabular-nums text-fg-muted">{formatTime(currentTime)}</span>
+        <div className="flex items-center gap-2 sm:gap-3">
+          <span className="font-mono text-xs tabular-nums text-fg-muted shrink-0">{formatTime(currentTime)}</span>
           <input
             type="range"
             min={0}
@@ -605,12 +632,12 @@ export function ScenePlayer({ bundle }: ScenePlayerProps) {
             step={0.1}
             value={currentTime}
             onChange={(e) => seek(Number(e.target.value))}
-            className="flex-1 accent-primary"
+            className="flex-1 accent-primary h-4 sm:h-5 cursor-pointer touch-none"
           />
-          <span className="font-mono text-xs tabular-nums text-fg-muted">{formatTime(totalDuration)}</span>
-  </div>
+          <span className="font-mono text-xs tabular-nums text-fg-muted shrink-0">{formatTime(totalDuration)}</span>
+        </div>
 
-        <p className="border-t border-border pt-3 text-xs text-fg-subtle">
+        <p className="border-t border-border pt-2.5 sm:pt-3 text-[11px] sm:text-xs text-fg-subtle break-words">
           {bundle.manifest.title}
           {bundle.manifest.voice_skipped
             ? ttsSupported
